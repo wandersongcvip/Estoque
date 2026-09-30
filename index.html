@@ -1026,13 +1026,11 @@
     var detail = isEntrada ?
       ("Valor unit. " + brl(mv.unitValue)) :
       (esc((findBranchByKey(mv.branch) || {}).label || mv.branch) + " · " + esc(mv.withdrawalName || ""));
-    var delBtn = isAdmin() ? ('<button class="est-btn est-btn-ghost" data-action="delete-movement" data-id="' + mv.id + '" title="Excluir movimentação (com rastreio)">' + ICON.trash + "</button>") : "";
     return '<div class="est-row">' +
       (isEntrada ? ICON.arrowIn : ICON.arrowOut) +
       '<div style="flex:1"><div class="est-row-name">' + esc(mv.itemName) + " <span style=\"font-weight:400;color:#8A8F98\">· " + esc(cat.label) + "</span></div>" +
       '<div class="est-row-meta">' + fmtDateTime(mv.occurredAt) + " · " + detail + " · por " + esc(mv.registeredBy) + "</div></div>" +
       '<div class="est-num" style="text-align:right;min-width:90px">' + mv.qty + " " + esc(mv.unit) + '<br/><span style="color:#8A8F98">' + brl(mv.totalValue) + "</span></div>" +
-      delBtn +
       "</div>";
   }
 
@@ -1567,7 +1565,7 @@
       if (fileInput) fileInput.click();
     } else if (action === "refresh") {
       state.loading = true; render();
-      await Promise.all([loadItems(), loadMovements(), loadCategories(), loadBranches(), loadUsers(), loadAuditLog(), loadDbSize()]);
+      await refreshAllData();
       render();
     } else if (action === "preview-on") {
       state.previewView = true; render();
@@ -1748,6 +1746,44 @@
     }
   });
 
+  async function refreshAllData() {
+    await Promise.all([loadItems(), loadMovements(), loadCategories(), loadBranches(), loadUsers(), loadAuditLog(), loadDbSize()]);
+  }
+
+  // Evita que uma atualização automática em segundo plano apague o que
+  // a pessoa está digitando (busca, formulário de item/movimentação
+  // aberto, etc.) — nesses casos, a atualização é adiada, não perdida.
+  function shouldSkipAutoRefresh() {
+    var ae = document.activeElement;
+    if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.tagName === "SELECT")) return true;
+    if (state.saving || state.loading) return true;
+    if (state.adding || state.editingId || state.movementItemId || state.addingCategory || state.addingBranch || state.purgeConfirmPending) return true;
+    return false;
+  }
+
+  // ---------- atualização em tempo real (Supabase Realtime) ----------
+  // Sempre que alguém (em qualquer computador/celular) adiciona, edita
+  // ou exclui algo, o Supabase avisa este app na hora e a tela é
+  // atualizada sozinha, sem precisar clicar em "Atualizar".
+  var realtimeRefreshTimer = null;
+  function scheduleRealtimeRefresh() {
+    if (realtimeRefreshTimer) clearTimeout(realtimeRefreshTimer);
+    realtimeRefreshTimer = setTimeout(function tryRealtimeRefresh() {
+      if (shouldSkipAutoRefresh()) { realtimeRefreshTimer = setTimeout(tryRealtimeRefresh, 3000); return; }
+      realtimeRefreshTimer = null;
+      refreshAllData().then(render);
+    }, 700);
+  }
+
+  function startRealtime() {
+    if (!supabaseClient) return;
+    var channel = supabaseClient.channel("estoque-live-changes");
+    ["items", "movements", "categories", "branches", "users", "audit_log"].forEach(function (t) {
+      channel.on("postgres_changes", { event: "*", schema: "public", table: t }, scheduleRealtimeRefresh);
+    });
+    channel.subscribe();
+  }
+
   async function initApp() {
     if (!supabaseConfigured) { state.loading = false; render(); return; }
     await Promise.all([loadItems(), loadUsers(), loadCategories(), loadBranches(), loadMovements()]);
@@ -1758,6 +1794,7 @@
     if (!forceView) {
       await Promise.all([loadAuditLog(), loadDbSize()]);
       render();
+      startRealtime();
     }
 
     if (forceView) {

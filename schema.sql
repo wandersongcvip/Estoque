@@ -334,4 +334,14 @@ grant execute on function excluir_movimento to anon, authenticated;
 grant execute on function purgar_periodo to anon, authenticated;
 grant execute on function get_db_size to anon, authenticated;
 
+-- Habilita o Supabase Realtime nas tabelas do app, para que o
+-- front-end receba as mudanças na hora (sem precisar clicar em
+-- "Atualizar").
+alter publication supabase_realtime add table items;
+alter publication supabase_realtime add table movements;
+alter publication supabase_realtime add table categories;
+alter publication supabase_realtime add table branches;
+alter publication supabase_realtime add table users;
+alter publication supabase_realtime add table audit_log;
+
 -- Fim do script. Se tudo rodou sem erro, seu banco está pronto.
