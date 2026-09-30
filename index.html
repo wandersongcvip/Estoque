@@ -1629,6 +1629,7 @@
       state.saving = false;
       if (delRes.error) { state.globalError = "Não foi possível excluir o item: " + delRes.error.message; render(); return; }
       state.items = state.items.filter(function (it) { return it.id !== id; });
+      state.movements = state.movements.filter(function (mv) { return mv.itemId !== id; });
       loadAuditLog();
       render();
     } else if (action === "show-entrada" || action === "show-saida") {

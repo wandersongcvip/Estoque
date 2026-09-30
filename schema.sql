@@ -236,11 +236,27 @@ $$ language plpgsql security definer;
 create or replace function excluir_item(p_item_id text, p_excluido_por text) returns void as $$
 declare
   v_row items%rowtype;
+  v_mov movements%rowtype;
 begin
   select * into v_row from items where id = p_item_id;
   if not found then
     raise exception 'Item não encontrado';
   end if;
+
+  -- Remove também as movimentações do item, para que seus valores
+  -- saiam dos Relatórios; cada uma é copiada para o log de auditoria
+  -- antes de ser apagada, para manter a rastreabilidade.
+  for v_mov in select * from movements where item_id = p_item_id loop
+    insert into audit_log (id, entity_type, entity_id, action, description, snapshot, performed_by, occurred_at)
+    values (
+      v_mov.id || '-del-' || floor(extract(epoch from clock_timestamp()))::text,
+      'movement', v_mov.id, 'excluido',
+      'Movimento de ' || v_mov.type || ' do item "' || coalesce(v_mov.item_name, v_row.name) || '" (' || v_mov.qty || ' ' || coalesce(v_mov.unit,'') || ') excluído junto com o item',
+      to_jsonb(v_mov), p_excluido_por, now()
+    );
+  end loop;
+
+  delete from movements where item_id = p_item_id;
 
   insert into audit_log (id, entity_type, entity_id, action, description, snapshot, performed_by, occurred_at)
   values (
