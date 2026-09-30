@@ -1,0 +1,1771 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Controle de Estoque</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
+  * { box-sizing: border-box; }
+  body { margin:0; }
+  .est-wrap { font-family:'Manrope', ui-sans-serif, system-ui, sans-serif; background:#F6F7F9; min-height:100vh; color:#1E2430; }
+  .est-num { font-family:'Manrope', ui-sans-serif, system-ui, sans-serif; font-variant-numeric: tabular-nums; font-weight:700; }
+  .est-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:18px 22px; border-bottom:1px solid #E5E7EB; background:#FFFFFF; flex-wrap:wrap; }
+  .est-brand { display:flex; align-items:center; gap:10px; }
+  .est-logo-mark { height:26px; display:flex; align-items:center; flex-shrink:0; }
+  .est-title { font-size:16px; font-weight:800; letter-spacing:-0.01em; }
+  .est-sub { font-size:12px; color:#6B7280; margin-top:1px; }
+  .est-btn { display:inline-flex; align-items:center; gap:6px; padding:8px 13px; border-radius:8px; font-size:13px; font-weight:500; border:1px solid #E5E7EB; background:#fff; color:#1E2430; cursor:pointer; transition:background .15s ease, border-color .15s ease; white-space:nowrap; font-family:inherit; }
+  .est-btn:hover { background:#F6F7F9; }
+  .est-btn-primary { background:#4F46E5; border-color:#4F46E5; color:#fff; }
+  .est-btn-primary:hover { background:#4338CA; }
+  .est-btn-ghost { border-color:transparent; background:transparent; padding:6px 8px; }
+  .est-btn-ghost:hover { background:#F1F2F4; }
+  .est-btn:disabled { opacity:.45; cursor:not-allowed; }
+  .est-nav { display:flex; gap:4px; padding:10px 22px; overflow-x:auto; background:#FFFFFF; border-bottom:1px solid #E5E7EB; }
+  .est-nav-item { display:flex; align-items:center; gap:7px; padding:8px 13px; border-radius:8px; font-size:13px; font-weight:500; color:#4B5563; cursor:pointer; white-space:nowrap; border:1px solid transparent; }
+  .est-nav-item:hover { background:#F6F7F9; }
+  .est-nav-item.active { background:#EEF2FF; color:#1E2430; border-color:#E0E7FF; }
+  .est-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; display:inline-block; }
+  .est-shell { display:flex; align-items:stretch; }
+  .est-sidebar { width:228px; flex-shrink:0; background:#FFFFFF; border-right:1px solid #E5E7EB; padding:16px 10px; overflow-y:auto; }
+  .est-sidebar-section { margin-bottom:20px; }
+  .est-sidebar-section:last-child { margin-bottom:0; }
+  .est-sidebar-title { font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:#9CA3AF; padding:0 10px; margin-bottom:6px; }
+  .est-sidebar-item { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:8px; font-size:13px; font-weight:500; color:#4B5563; cursor:pointer; white-space:nowrap; border:1px solid transparent; margin-bottom:2px; }
+  .est-sidebar-item:hover { background:#F6F7F9; }
+  .est-sidebar-item.active { background:#EEF2FF; color:#1E2430; border-color:#E0E7FF; }
+  .est-content { flex:1; min-width:0; }
+  .est-header-right-col { display:flex; flex-direction:column; align-items:flex-end; gap:6px; }
+  .est-header-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end; }
+  .est-main { max-width:960px; margin:0 auto; padding:24px 22px 60px; }
+  .est-storage-bar { height:8px; border-radius:6px; background:#EDEEF1; overflow:hidden; margin:8px 0; }
+  .est-storage-fill { height:100%; border-radius:6px; background:#16A34A; transition:width .2s ease; }
+  .est-storage-fill.warn { background:#D97706; }
+  .est-storage-fill.danger { background:#DC2626; }
+  .est-warning-banner { font-size:12.5px; border-radius:7px; padding:9px 12px; margin-bottom:14px; color:#92400E; background:#FFFBEB; border:1px solid #FDE68A; }
+  .est-h2 { font-size:15px; font-weight:600; margin:0 0 12px; }
+  .est-tiles { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:26px; }
+  .est-tile { background:#fff; border:1px solid #E5E7EB; border-left:3px solid; border-radius:9px; padding:14px 16px; }
+  .est-tile-num { font-size:28px; font-weight:600; line-height:1.1; }
+  .est-tile-label { font-size:12.5px; color:#6B7280; margin-top:4px; }
+  .est-catgrid { display:grid; grid-template-columns:repeat(auto-fill, minmax(200px,1fr)); gap:10px; margin-bottom:28px; }
+  .est-catcard { background:#fff; border:1px solid #E5E7EB; border-radius:9px; padding:12px 14px; cursor:pointer; transition:border-color .15s ease; }
+  .est-catcard:hover { border-color:#C7CAD1; }
+  .est-catcard-top { display:flex; align-items:center; gap:8px; font-size:13.5px; font-weight:500; margin-bottom:8px; }
+  .est-catcard-counts { display:flex; gap:12px; font-size:12.5px; }
+  .est-row { display:flex; align-items:center; gap:12px; padding:12px 2px; border-bottom:1px solid #EDEEF1; }
+  .est-row:last-child { border-bottom:none; }
+  .est-row-name { font-size:13.5px; font-weight:500; }
+  .est-row-meta { font-size:12px; color:#8A8F98; margin-top:1px; }
+  .est-badge { font-size:11.5px; font-weight:600; padding:3px 9px; border-radius:20px; white-space:nowrap; }
+  .est-input { border:1px solid #DADDE2; border-radius:7px; padding:7px 10px; font-size:13px; font-family:inherit; background:#fff; width:100%; }
+  .est-input:focus { outline:2px solid #C7D2FE; border-color:#4F46E5; }
+  .est-label { font-size:11.5px; color:#6B7280; margin-bottom:4px; display:block; }
+  .est-field { flex:1; min-width:110px; }
+  .est-form { background:#FAFAFB; border:1px solid #E5E7EB; border-radius:9px; padding:16px; margin-bottom:16px; }
+  .est-form-grid { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:12px; }
+  .est-stepper { display:flex; align-items:center; gap:4px; }
+  .est-stepper input { width:46px; text-align:center; border:1px solid #DADDE2; border-radius:6px; padding:6px 2px; font-size:13px; font-family:'IBM Plex Mono',monospace; }
+  .est-empty { text-align:center; padding:40px 20px; color:#8A8F98; font-size:13.5px; }
+  .est-search { display:flex; align-items:center; gap:8px; border:1px solid #DADDE2; border-radius:8px; padding:8px 12px; background:#fff; flex:1; min-width:180px; }
+  .est-search input { border:none; outline:none; font-size:13px; width:100%; font-family:inherit; }
+  .est-select { border:1px solid #DADDE2; border-radius:8px; padding:8px 10px; font-size:13px; background:#fff; font-family:inherit; }
+  .est-toolbar { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
+  .est-readonly-note { font-size:12px; color:#6B7280; }
+  .ic { display:inline-flex; }
+  .est-login-wrap { min-height:100vh; display:flex; align-items:center; justify-content:center; background:#F6F7F9; padding:20px; }
+  .est-login-card { background:#fff; border:1px solid #E5E7EB; border-radius:12px; padding:32px 28px; width:100%; max-width:360px; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+  .est-login-logo { height:28px; margin-bottom:18px; display:flex; justify-content:center; }
+  .est-login-title { font-size:16px; font-weight:800; text-align:center; margin-bottom:4px; }
+  .est-login-sub { font-size:12.5px; color:#6B7280; text-align:center; margin-bottom:20px; }
+  .est-login-field { margin-bottom:12px; }
+  .est-login-msg { font-size:12.5px; border-radius:7px; padding:8px 10px; margin-bottom:14px; }
+  .est-login-error { color:#DC2626; background:#FEF2F2; border:1px solid #FECACA; }
+  .est-login-success { color:#16A34A; background:#F0FDF4; border:1px solid #BBF7D0; }
+  .est-login-btn { width:100%; justify-content:center; padding:9px 13px; }
+  .est-login-hint { font-size:11.5px; color:#9CA3AF; text-align:center; margin-top:16px; }
+  .est-role-badge { font-size:11.5px; font-weight:600; padding:3px 10px; border-radius:20px; background:#EEF2FF; color:#4F46E5; white-space:nowrap; }
+  .est-user-chip { font-size:12.5px; color:#4B5563; white-space:nowrap; }
+  .est-cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
+  .est-cal-daylabel { font-size:11px; font-weight:700; color:#8A8F98; text-align:center; padding-bottom:4px; }
+  .est-cal-cell { min-height:64px; border:1px solid #E5E7EB; border-radius:8px; padding:6px; cursor:pointer; background:#fff; }
+  .est-cal-cell-empty { border:none; cursor:default; background:transparent; }
+  .est-cal-cell:hover { border-color:#B9BFC9; }
+  .est-cal-cell.today { border-color:#4F46E5; }
+  .est-cal-cell.active { background:#EEF2FF; border-color:#4F46E5; }
+  .est-cal-daynum { font-size:12.5px; font-weight:700; color:#2A2E35; }
+  .est-cal-dots { display:flex; gap:4px; margin-top:6px; flex-wrap:wrap; }
+  .est-cal-dot { font-size:10.5px; font-weight:700; padding:1px 6px; border-radius:20px; }
+  .est-cal-dot-in { background:#F0FDF4; color:#16A34A; }
+  .est-cal-dot-out { background:#FEF2F2; color:#DC2626; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+(function () {
+  "use strict";
+
+  // ---------- CONFIGURAÇÃO DO BANCO (Supabase) ----------
+  // Cole aqui a "Project URL" e a chave "anon public" do seu projeto Supabase.
+  // Painel do Supabase → seu projeto → Project Settings → API.
+  var SUPABASE_URL = "https://ijsvaqsgqgzxyeqxihrx.supabase.co";
+  var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlqc3ZhcXNncWd6eHllcXhpaHJ4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg1NzIwOTksImV4cCI6MjEwNDE0ODA5OX0.1AvT043Zqr1GPAUZKUny9HqRAYTtGKGuDKpSFRo6eYs";
+
+  var supabaseClient = null;
+  var supabaseConfigured = SUPABASE_URL.indexOf("COLE_AQUI") === -1 && SUPABASE_ANON_KEY.indexOf("COLE_AQUI") === -1;
+  if (supabaseConfigured && window.supabase) {
+    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  }
+
+  var STATUS_META = {
+    baixo: { label: "Baixo", color: "#DC2626", bg: "#FEF2F2" },
+    medio: { label: "Médio", color: "#D97706", bg: "#FFFBEB" },
+    ok: { label: "OK", color: "#16A34A", bg: "#F0FDF4" }
+  };
+
+  // O login (sessão) continua salvo neste navegador — todo o resto dos
+  // dados agora vive no banco compartilhado (Supabase), não mais aqui.
+  var SESSION_KEY = "estoque-sessao-v1";
+
+  var LOGO_SVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1257 376\" fill=\"none\" style=\"height:100%;width:auto;display:block\"><g clip-path=\"url(#clip0_343_888)\"><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M406.213 116.319L397.252 116.584L388.622 117.381L380.256 118.687L372.2 120.524L364.431 122.892L356.97 125.769L349.797 129.177L342.911 133.116L335.472 138.184L328.564 143.783L322.185 149.935L316.314 156.641L310.95 163.855L306.117 171.623L301.813 179.944L298.502 187.602L295.61 195.547L293.182 203.757L291.196 212.277L289.629 221.085L288.525 230.181L287.863 239.564L287.642 249.236L287.885 258.663L288.591 267.781L289.761 276.611L291.417 285.132L293.536 293.342L296.14 301.243L299.208 308.856L302.762 316.159L307.331 324.082L312.407 331.451L317.991 338.267L318.013 338.289L324.127 344.619L330.749 350.395L337.878 355.662L345.515 360.376L352.556 364.049L359.906 367.214L367.521 369.892L375.445 372.083L383.656 373.787L392.131 375.026L401.114 375.757H401.534L409.987 376L419.522 375.757L428.682 375.093L437.489 373.942L445.921 372.371L453.999 370.312L461.702 367.834L469.03 364.868L477.175 361.084L484.878 357.123L492.183 353.006L499.048 348.691L505.515 344.22L511.541 339.573L511.32 339.108H436.915L427.645 338.798L418.706 337.891L410.098 336.386L401.843 334.262L393.941 331.54L386.37 328.22L379.219 324.259L372.62 319.611L366.528 314.278L360.965 308.258L355.933 301.552L351.408 294.161L348.031 287.345L345.162 280.086L342.822 272.384L341.012 264.284L339.71 255.742L338.916 246.801L338.849 244.323L321.655 244.035V223.697L339.114 223.166L339.512 216.947L340.593 207.608L342.116 198.866L344.058 190.722L346.42 183.176L349.223 176.226L352.468 169.853L356.132 164.099L361.385 157.57L367.168 152.06L373.458 147.545L380.278 144.026L387.606 141.503L395.464 139.999L403.851 139.512H477.748L473.577 136.17L465.719 130.991L458.502 127.096L450.843 123.799L442.764 121.121L434.267 119.019L425.327 117.514L415.991 116.629L406.213 116.319Z\" fill=\"#294534\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M504.941 325.852L496.333 328.95L487.747 331.65L479.205 333.93L470.685 335.789L462.187 337.249L453.734 338.267L445.302 338.887L436.915 339.108H511.32L504.941 325.852Z\" fill=\"#294534\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M477.748 139.512H403.851L412.79 140.109L421.09 141.924L428.704 144.934L435.657 149.183L441.925 154.605L447.532 161.266L451.748 167.773L455.301 174.899L458.193 182.6L460.466 190.921L462.077 199.818L463.048 209.334L463.357 219.426L339.114 223.166L338.871 226.884L338.651 237.418L338.849 244.035V244.323L513.902 247.332L514.322 242.375L514.609 237.418L514.785 232.438L514.851 227.481L514.609 218.43L513.858 209.688L512.6 201.256L510.834 193.112L508.583 185.278L505.824 177.731L502.579 170.473L498.143 162.483L493.022 155.07L487.217 148.187L480.728 141.902L477.748 139.512Z\" fill=\"#294534\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M339.114 223.166L321.655 223.697V244.035L338.849 244.323L338.651 237.418L338.871 227.481V226.884L339.114 223.166Z\" fill=\"#294534\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M736.852 139.999H655.715L666.773 140.751L676.264 143.03L684.188 146.793L690.544 152.082L694.562 157.548L697.674 164.276L699.903 172.287L701.227 181.538L701.691 192.094V230.27L690.655 232.084L680.104 233.988L670.04 235.957L660.46 238.015L651.389 240.14L642.781 242.331L634.68 244.61L627.065 246.956L619.936 249.39L610.533 252.976L601.925 256.738L594.112 260.677L587.093 264.771L580.891 269.02L575.505 273.447L565.617 284.777L561.512 291.97L558.554 299.583L556.81 307.661L556.214 316.137L556.766 325.099L558.444 333.354L561.247 340.879L565.153 347.717L570.208 353.825L576.344 359.225L583.363 363.872L590.956 367.657L599.144 370.6L607.929 372.703L617.31 373.964L627.286 374.384L637.285 373.986L646.82 372.835L655.869 370.888L664.433 368.166L672.534 364.669L679.906 360.818L687.41 356.414L695.069 351.457L702.883 345.991H774.904L770.401 344.552L766.34 343.136H649.093L640.287 342.627L632.385 341.056L625.366 338.466L619.23 334.859L614.264 330.167L610.71 324.369L608.569 317.487L607.863 309.52L608.415 303.434L612.917 291.726L616.868 286.083L622.276 280.573L629.471 275.195L638.499 269.928L649.314 264.771L656.355 261.894L664.058 259.062L672.445 256.295L681.495 253.551L691.251 250.873L701.691 248.24H753.803V196.83L753.472 186.65L752.479 177.178L750.801 168.437L748.483 160.425L745.482 153.122L741.818 146.527L737.47 140.663L736.852 139.999Z\" fill=\"#294534\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M774.903 345.991H702.883L704.317 351.037L708.93 359.8L717.759 368.055L724.314 371.308L731.753 373.256L740.074 373.92L745.393 373.743L756.76 372.304L768.878 369.626L780.488 366.55L789.824 363.496V350.705L774.903 345.991Z\" fill=\"#294534\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M753.803 248.24H701.691V326.538L695.422 330.19L689.441 333.354L678.228 338.157L671.165 340.348L663.948 341.897L656.598 342.826L649.093 343.136H766.34L759.188 338.688L755.679 332.602L754.024 322.178L753.803 315.207V248.24Z\" fill=\"#294534\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M669.929 116.319L660.769 116.496L651.477 117.005L642.052 117.868L632.473 119.063L622.784 120.59L615.632 121.874L608.128 123.334L600.248 124.928L583.451 128.601L565.22 132.895L578.22 192.36L603.559 183.22L605.501 177.886L607.311 171.601L609.452 165.98L614.727 156.818L621.614 149.825L630.376 144.491L641.567 141.127L648.277 140.286L655.715 139.999H736.852L732.481 135.506L726.831 131.014L720.585 127.119L713.698 123.821L706.194 121.121L698.049 119.019L689.308 117.514L679.928 116.629L669.929 116.319Z\" fill=\"#294534\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M965.539 0L955.982 0.33196L946.933 1.28358L938.435 2.89912L930.445 5.15644L923.007 8.03343L916.076 11.5743L909.697 15.757L903.826 20.5594L898.485 26.0257L894.136 31.4919L890.185 37.4672L886.676 43.9736L883.586 50.9891L880.893 58.5356L878.642 66.6133L876.788 75.2L875.375 84.2957L874.36 93.9225L873.786 104.058L873.323 122.028L835.668 134.798V149.471H873.323V320.209L872.44 330.743L869.791 337.714L864.67 342.206L856.371 345.283L829.554 351.435V367.989H975.428V351.435L942.011 345.747L937.287 344.397L930.445 340.613L925.898 331.097L925.081 320.209V149.471H992.842V121.564L923.669 124.396L919.916 116.275L916.716 108.44L914.045 100.894L911.904 93.657L910.249 86.6858L909.079 79.936L908.13 67.1666L908.638 59.7749L910.183 53.1579L916.363 42.336L926.075 35.4312L938.722 33.1075L944.681 33.3952L957.019 35.6525L963.42 37.6L971.874 40.7868L980.57 44.5048L1004.41 35.8517L1010.72 4.73596L1001.08 3.0319L991.739 1.70406L982.711 0.774573L973.971 0.199176L965.539 0Z\" fill=\"#294534\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M1103.07 162.262L1095.68 166.356L1088.61 170.982L1081.93 176.072L1075.61 181.626L1069.74 187.624L1064.29 194.02L1059.32 200.814L1054.84 207.962L1050.87 215.464L1047.45 223.254L1044.6 231.354L1042.33 239.697L1040.67 248.306L1039.66 257.092L1039.33 266.099V354.932L1103.07 291.018V162.262Z\" fill=\"#44882B\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M1175.49 149.78H1155.31L1146.6 150.112L1138.03 151.086L1129.69 152.657L1121.54 154.804V272.495L1175.49 218.408V149.78Z\" fill=\"#44882B\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M1243.93 149.78H1193.96V199.884L1243.93 149.78Z\" fill=\"#44882B\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M1244.55 304.097H1116.16L1052.39 368.011H1140.99L1149.95 367.679L1158.74 366.661L1167.3 365.023L1175.64 362.744L1183.72 359.867L1191.49 356.436L1198.97 352.453L1206.1 347.96L1212.88 342.981L1219.28 337.515L1225.24 331.606L1230.8 325.299L1235.88 318.593L1240.47 311.511L1244.55 304.097Z\" fill=\"#44882B\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M1256.98 231.531H1188.53L1134.63 285.574H1251.99L1254.13 277.408L1255.7 269.042L1256.67 260.478L1256.98 251.714V231.531Z\" fill=\"#44882B\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M1256.98 162.882L1207.01 213.008H1256.98V162.882Z\" fill=\"#44882B\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M129.783 28.6813H2.42792V43.4204L25.8022 48.8866L34.1233 53.8882L38.2728 61.2577L39.7296 67.8969L39.9062 70.796V323.329L39.5972 330.167L34.2557 340.347L0 351.523V368.033H247.714V359.867H247.913V251.913H229.637H223.236V265.9L223.037 275.46L222.397 284.113L221.272 291.903L219.55 298.875L214.142 310.405L205.623 318.969L193.439 324.79L185.824 326.737L177.062 328.109L167.129 328.906L155.939 329.149H126.384V329.127H92.3934V72.0353L92.2168 60.6159L93.6073 54.3972L97.9114 51.2104L106.409 48.8866L129.783 43.4204V28.6813Z\" fill=\"#294534\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M406.213 116.319L397.252 116.584L388.622 117.381L380.256 118.687L372.2 120.524L364.431 122.892L356.97 125.769L349.797 129.177L342.911 133.116L335.472 138.184L328.564 143.783L322.185 149.935L316.314 156.641L310.95 163.855L306.117 171.623L301.813 179.944L298.502 187.602L295.61 195.547L293.182 203.757L291.196 212.277L289.629 221.085L288.525 230.181L287.863 239.564L287.642 249.236L287.885 258.663L288.591 267.781L289.761 276.611L291.417 285.132L293.536 293.342L296.14 301.243L299.208 308.856L302.762 316.159L307.331 324.082L312.407 331.451L317.991 338.267L318.013 338.289L324.127 344.619L330.749 350.395L337.878 355.662L345.515 360.376L352.556 364.049L359.906 367.214L367.521 369.892L375.445 372.083L383.656 373.787L392.131 375.026L401.114 375.757H401.534L409.987 376L419.522 375.757L428.682 375.093L437.489 373.942L445.921 372.371L453.999 370.312L461.702 367.834L469.03 364.868L477.175 361.084L484.878 357.123L492.183 353.006L499.048 348.691L505.515 344.22L511.541 339.573L511.32 339.108H436.915L427.645 338.798L418.706 337.891L410.098 336.386L401.843 334.262L393.941 331.54L386.37 328.22L379.219 324.259L372.62 319.611L366.528 314.278L360.965 308.258L355.933 301.552L351.408 294.161L348.031 287.345L345.162 280.086L342.822 272.384L341.012 264.284L339.71 255.742L338.916 246.801L338.849 244.323L321.655 244.035V223.697L339.114 223.166L339.512 216.947L340.593 207.608L342.116 198.866L344.058 190.722L346.42 183.176L349.223 176.226L352.468 169.853L356.132 164.099L361.385 157.57L367.168 152.06L373.458 147.545L380.278 144.026L387.606 141.503L395.464 139.999L403.851 139.512H477.748L473.577 136.17L465.719 130.991L458.502 127.096L450.843 123.799L442.764 121.121L434.267 119.019L425.327 117.514L415.991 116.629L406.213 116.319Z\" fill=\"#2A4534\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M504.941 325.852L496.333 328.95L487.747 331.65L479.205 333.93L470.685 335.789L462.187 337.249L453.734 338.267L445.302 338.887L436.915 339.108H511.32L504.941 325.852Z\" fill=\"#2A4534\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M477.748 139.512H403.851L412.79 140.109L421.09 141.924L428.704 144.934L435.657 149.183L441.925 154.605L447.532 161.266L451.748 167.773L455.301 174.899L458.193 182.6L460.466 190.921L462.077 199.818L463.048 209.334L463.357 219.426L339.114 223.166L338.871 226.884L338.651 237.418L338.849 244.035V244.323L513.902 247.332L514.322 242.375L514.609 237.418L514.785 232.438L514.851 227.481L514.609 218.43L513.858 209.688L512.6 201.256L510.834 193.112L508.583 185.278L505.824 177.731L502.579 170.473L498.143 162.483L493.022 155.07L487.217 148.187L480.728 141.902L477.748 139.512Z\" fill=\"#2A4534\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M339.114 223.166L321.655 223.697V244.035L338.849 244.323L338.651 237.418L338.871 227.481V226.884L339.114 223.166Z\" fill=\"#2A4534\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M736.852 139.999H655.715L666.773 140.751L676.264 143.008L684.188 146.793L690.544 152.082L694.562 157.548L697.674 164.276L699.903 172.265L701.227 181.538L701.691 192.094V230.27L690.655 232.084L680.104 233.988L670.04 235.957L660.46 238.015L651.389 240.14L642.781 242.331L634.68 244.61L627.065 246.956L619.936 249.39L610.533 252.976L601.925 256.738L594.112 260.677L587.093 264.771L580.891 269.02L575.505 273.447L565.617 284.777L561.512 291.97L558.554 299.583L556.81 307.661L556.214 316.137L556.766 325.099L558.444 333.354L561.247 340.879L565.153 347.717L570.186 353.825L576.344 359.225L583.363 363.872L590.956 367.657L599.144 370.6L607.929 372.703L617.31 373.964L627.286 374.384L637.285 373.986L646.82 372.835L655.869 370.888L664.433 368.166L672.534 364.669L679.906 360.818L687.41 356.414L695.069 351.457L702.883 345.991H774.904L770.401 344.552L766.34 343.136H649.093L640.287 342.627L632.385 341.056L625.366 338.466L619.23 334.859L614.264 330.167L610.71 324.369L608.569 317.487L607.863 309.52L608.415 303.434L612.917 291.726L616.868 286.083L622.276 280.573L629.471 275.195L638.499 269.928L649.314 264.771L656.355 261.894L664.058 259.062L672.445 256.295L681.495 253.551L691.251 250.873L701.691 248.24H753.803V196.83L753.472 186.65L752.479 177.178L750.801 168.437L748.483 160.425L745.482 153.122L741.818 146.527L737.47 140.663L736.852 139.999Z\" fill=\"#2A4534\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M774.903 345.991H702.883L704.317 351.037L708.93 359.8L717.759 368.055L724.314 371.308L731.753 373.256L740.074 373.92L745.393 373.743L756.76 372.304L768.878 369.626L780.488 366.55L789.824 363.496V350.705L774.903 345.991Z\" fill=\"#2A4534\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M753.803 248.24H701.691V326.538L695.422 330.19L689.441 333.354L678.228 338.157L671.165 340.348L663.948 341.897L656.598 342.826L649.093 343.136H766.34L759.188 338.688L755.679 332.602L754.024 322.178L753.803 315.207V248.24Z\" fill=\"#2A4534\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M669.929 116.319L660.769 116.496L651.477 117.005L642.052 117.868L632.473 119.063L622.784 120.59L615.632 121.874L608.128 123.334L600.248 124.928L583.451 128.601L565.22 132.895L578.22 192.36L603.559 183.22L605.501 177.886L607.311 171.601L609.452 165.98L614.727 156.818L621.614 149.825L630.376 144.491L641.567 141.127L648.277 140.286L655.715 139.999H736.852L732.481 135.506L726.831 131.014L720.585 127.119L713.698 123.821L706.194 121.121L698.049 119.019L689.308 117.514L679.928 116.629L669.929 116.319Z\" fill=\"#2A4534\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M965.539 0L955.982 0.33196L946.933 1.28358L938.435 2.89912L930.445 5.15644L923.007 8.03343L916.076 11.5743L909.697 15.757L903.826 20.5594L898.485 26.0257L894.136 31.4919L890.185 37.4672L886.676 43.9736L883.586 50.9891L880.893 58.5356L878.642 66.6133L876.788 75.2L875.375 84.2957L874.36 93.9225L873.786 104.058L873.323 122.028L835.668 134.798V149.471H873.323V320.209L872.44 330.743L869.791 337.714L864.67 342.206L856.371 345.283L829.554 351.435V367.989H975.428V351.435L942.011 345.747L937.287 344.397L930.445 340.613L925.898 331.097L925.081 320.209V149.471H992.842V121.564L923.669 124.396L919.916 116.275L916.716 108.44L914.045 100.894L911.904 93.657L910.249 86.6858L909.079 79.936L908.13 67.1666L908.638 59.7749L910.183 53.1579L916.363 42.336L926.075 35.4312L938.722 33.1075L944.681 33.3952L957.019 35.6525L963.42 37.6L971.874 40.7868L980.57 44.5048L1004.41 35.8517L1010.72 4.73596L1001.08 3.0319L991.739 1.70406L982.711 0.774573L973.971 0.199176L965.539 0Z\" fill=\"#2A4534\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M1103.07 162.262L1095.68 166.356L1088.61 170.982L1081.93 176.072L1075.63 181.626L1069.74 187.624L1064.31 194.02L1059.32 200.814L1054.84 207.962L1050.87 215.464L1047.45 223.254L1044.6 231.354L1042.33 239.697L1040.67 248.306L1039.66 257.092L1039.33 266.099V354.932L1103.07 291.018V162.262Z\" fill=\"#44882B\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M1175.49 149.78H1155.31L1146.6 150.112L1138.03 151.086L1129.69 152.657L1121.54 154.804V272.495L1175.49 218.408V149.78Z\" fill=\"#44882B\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M1243.93 149.78H1193.96V199.884L1243.93 149.78Z\" fill=\"#44882B\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M1244.55 304.097H1116.16L1052.39 368.033H1140.99L1149.95 367.679L1158.74 366.661L1167.3 365.023L1175.64 362.744L1183.72 359.867L1191.49 356.436L1198.97 352.453L1206.1 347.96L1212.88 342.981L1219.28 337.515L1225.26 331.606L1230.8 325.299L1235.88 318.593L1240.47 311.511L1244.55 304.097Z\" fill=\"#44882B\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M1257 231.531H1188.53L1134.63 285.574H1251.99L1254.13 277.408L1255.7 269.042L1256.67 260.478L1257 251.714V231.531Z\" fill=\"#44882B\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M1257 162.882L1207.01 213.008H1257V162.882Z\" fill=\"#44882B\"></path><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M129.783 28.6813H2.42792V43.4204L25.8022 48.8866L34.1233 53.8882L38.2728 61.2355L39.7296 67.8969L39.9062 70.796V323.329L39.5972 330.167L34.2557 340.347L0 351.523V368.033H247.714V359.867H247.913V251.913H229.637H223.236V265.9L223.037 275.46L222.397 284.113L221.272 291.903L219.55 298.875L214.142 310.405L205.623 318.969L193.439 324.79L185.824 326.737L177.062 328.109L167.129 328.906L155.939 329.149H126.384V329.127H92.3934V72.0353L92.2168 60.6159L93.6073 54.3972L97.9114 51.2104L106.409 48.8866L129.783 43.4204V28.6813Z\" fill=\"#2A4534\"></path></g><defs><clipPath id=\"clip0_343_888\"><rect width=\"1257\" height=\"376\" fill=\"white\"></rect></clipPath></defs></svg>";
+
+  var ICON = {
+    plus: '<svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+    minus: '<svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+    x: '<svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+    check: '<svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+    search: '<svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8A8F98" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+    refresh: '<svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
+    copy: '<svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+    eye: '<svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
+    edit: '<svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
+    trash: '<svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#DC2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+    back: '<svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>',
+    grid: '<svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>',
+    box: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8L12 3 3 8v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5"/><line x1="12" y1="13" x2="12" y2="21"/></svg>',
+    user: '<svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+    logout: '<svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
+    download: '<svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+    upload: '<svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+    report: '<svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',
+    calendar: '<svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+    arrowIn: '<svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#16A34A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>',
+    arrowOut: '<svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#DC2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="5 12 12 19 19 12"/></svg>'
+  };
+
+  var state = {
+    items: [],
+    activeTab: "dashboard",
+    loading: true,
+    previewView: false,
+    adding: false,
+    editingId: null,
+    copied: false,
+    lastUpdated: null,
+    users: [],
+    currentUser: null,
+    loginError: "",
+    addingUser: false,
+    editingUserId: null,
+    userFormError: "",
+    passwordError: "",
+    passwordSuccess: false,
+    categories: [],
+    addingCategory: false,
+    categoryFormError: "",
+    importMsg: null,
+    movements: [],
+    movementItemId: null,
+    movementType: null,
+    movementError: "",
+    branches: [],
+    addingBranch: false,
+    branchFormError: "",
+    calendarMonth: "",
+    calendarSelectedDate: "",
+    itemFormError: "",
+    globalError: "",
+    saving: false,
+    auditLog: [],
+    dbSizeBytes: null,
+    storageWarning: "",
+    purgeConfirmPending: false,
+    purgeMsg: null,
+    downloadMsg: null,
+    purging: false
+  };
+
+  var DB_LIMIT_BYTES = 500 * 1024 * 1024; // limite do plano gratuito do Supabase (500 MB)
+
+  var forceView = (function () {
+    try { return new URLSearchParams(window.location.search).get("view") === "dashboard"; }
+    catch (e) { return false; }
+  })();
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function catMeta(key) {
+    for (var i = 0; i < state.categories.length; i++) if (state.categories[i].key === key) return state.categories[i];
+    return state.categories[0] || { key: "outros", label: "Outros", color: "#6B7280" };
+  }
+
+  function slugify(str) {
+    var s = String(str == null ? "" : str)
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-+|-+$)/g, "");
+    return s || ("cat-" + Date.now().toString(36));
+  }
+
+  function uniqueCategoryKey(base) {
+    var key = base, n = 2;
+    while (state.categories.some(function (c) { return c.key === key; })) {
+      key = base + "-" + n; n++;
+    }
+    return key;
+  }
+
+  function findCategoryByLabel(label) {
+    var norm = String(label == null ? "" : label).trim().toLowerCase();
+    for (var i = 0; i < state.categories.length; i++) {
+      if (state.categories[i].label.trim().toLowerCase() === norm) return state.categories[i];
+    }
+    return null;
+  }
+
+  async function loadCategories() {
+    var res = await supabaseClient.from("categories").select("*").order("label");
+    if (res.error) { state.globalError = "Não foi possível carregar as categorias: " + res.error.message; state.categories = []; return; }
+    state.categories = res.data || [];
+  }
+
+  async function insertCategory(row) {
+    return supabaseClient.from("categories").insert(row);
+  }
+
+  // ---------- filiais ----------
+
+  async function loadBranches() {
+    var res = await supabaseClient.from("branches").select("*").order("label");
+    if (res.error) { state.globalError = "Não foi possível carregar as filiais: " + res.error.message; state.branches = []; return; }
+    state.branches = res.data || [];
+  }
+
+  async function insertBranch(row) {
+    return supabaseClient.from("branches").insert(row);
+  }
+
+  function findBranchByLabel(label) {
+    var norm = String(label == null ? "" : label).trim().toLowerCase();
+    for (var i = 0; i < state.branches.length; i++) {
+      if (state.branches[i].label.trim().toLowerCase() === norm) return state.branches[i];
+    }
+    return null;
+  }
+
+  function findBranchByKey(key) {
+    for (var i = 0; i < state.branches.length; i++) if (state.branches[i].key === key) return state.branches[i];
+    return null;
+  }
+
+  function uniqueBranchKey(base) {
+    var key = base, n = 2;
+    while (state.branches.some(function (b) { return b.key === key; })) { key = base + "-" + n; n++; }
+    return key;
+  }
+
+  // ---------- movimentações (entrada/saída) ----------
+
+  async function loadMovements() {
+    var res = await supabaseClient.from("movements").select("*").order("occurred_at", { ascending: false }).limit(1000);
+    if (res.error) { state.globalError = "Não foi possível carregar as movimentações: " + res.error.message; state.movements = []; return; }
+    state.movements = (res.data || []).map(mapMovementFromDb);
+  }
+
+  function mapMovementFromDb(row) {
+    return {
+      id: row.id, type: row.type, itemId: row.item_id, itemName: row.item_name, categoryKey: row.category_key,
+      unit: row.unit, qty: Number(row.qty) || 0, unitValue: Number(row.unit_value) || 0, totalValue: Number(row.total_value) || 0,
+      branch: row.branch, withdrawalName: row.withdrawal_name, note: row.note,
+      occurredAt: row.occurred_at, registeredBy: row.registered_by
+    };
+  }
+
+  // ---------- log de auditoria / armazenamento ----------
+
+  async function loadAuditLog() {
+    var res = await supabaseClient.from("audit_log").select("*").order("occurred_at", { ascending: false }).limit(500);
+    if (res.error) { state.auditLog = []; return; }
+    state.auditLog = (res.data || []).map(mapAuditLogFromDb);
+  }
+
+  function mapAuditLogFromDb(row) {
+    return {
+      id: row.id, entityType: row.entity_type, entityId: row.entity_id, action: row.action,
+      description: row.description, snapshot: row.snapshot, performedBy: row.performed_by, occurredAt: row.occurred_at
+    };
+  }
+
+  async function loadDbSize() {
+    var res = await supabaseClient.rpc("get_db_size");
+    if (res.error) { return; }
+    state.dbSizeBytes = Number(res.data) || 0;
+    var pct = state.dbSizeBytes / DB_LIMIT_BYTES;
+    state.storageWarning = pct >= 0.8 ?
+      ("Atenção: o banco de dados já usa " + (pct * 100).toFixed(0) + "% do limite gratuito do Supabase (500 MB). Considere baixar e apagar movimentações antigas em Relatórios Gerais → Log.") : "";
+  }
+
+  // ---------- datas ----------
+
+  function pad2(n) { return (n < 10 ? "0" : "") + n; }
+
+  function localDateKey(d) {
+    return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+  }
+
+  function toDatetimeLocalValue(d) {
+    return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()) + "T" + pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+  }
+
+  function todayKey() { return localDateKey(new Date()); }
+
+  function firstDayOfMonthKey() {
+    var d = new Date();
+    return localDateKey(new Date(d.getFullYear(), d.getMonth(), 1));
+  }
+
+  function currentMonthKey() {
+    var d = new Date();
+    return d.getFullYear() + "-" + pad2(d.getMonth() + 1);
+  }
+
+  function fmtDateTime(iso) {
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return "-";
+    return d.toLocaleDateString("pt-BR") + " " + pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+  }
+
+  function brl(n) {
+    var v = Number(n) || 0;
+    try { return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }); }
+    catch (e) { return "R$ " + v.toFixed(2); }
+  }
+
+  function getStatus(item) {
+    var qty = Number(item.qty) || 0, min = Number(item.min) || 0, ideal = Number(item.ideal) || 0;
+    if (qty <= min) return "baixo";
+    if (qty < ideal) return "medio";
+    return "ok";
+  }
+
+  function uid() {
+    return "it_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  }
+
+  async function loadItems() {
+    var res = await supabaseClient.from("items").select("*").order("name");
+    if (res.error) { state.globalError = "Não foi possível carregar os itens: " + res.error.message; state.items = []; }
+    else { state.items = (res.data || []).map(mapItemFromDb); }
+    state.loading = false;
+    state.lastUpdated = new Date();
+  }
+
+  function mapItemFromDb(row) {
+    return {
+      id: row.id, category: row.category, name: row.name, unit: row.unit,
+      qty: Number(row.qty) || 0, min: Number(row.min) || 0, ideal: Number(row.ideal) || 0,
+      avgCost: Number(row.avg_cost) || 0
+    };
+  }
+
+  function findItemById(id) {
+    for (var i = 0; i < state.items.length; i++) if (state.items[i].id === id) return state.items[i];
+    return null;
+  }
+
+  async function refetchItem(id) {
+    var res = await supabaseClient.from("items").select("*").eq("id", id).single();
+    if (res.error || !res.data) return null;
+    var mapped = mapItemFromDb(res.data);
+    var idx = -1;
+    for (var i = 0; i < state.items.length; i++) if (state.items[i].id === id) { idx = i; break; }
+    if (idx >= 0) state.items[idx] = mapped; else state.items.push(mapped);
+    return mapped;
+  }
+
+  async function refetchMovement(id) {
+    var res = await supabaseClient.from("movements").select("*").eq("id", id).single();
+    if (res.error || !res.data) return null;
+    var mv = mapMovementFromDb(res.data);
+    state.movements = state.movements.filter(function (m) { return m.id !== id; });
+    state.movements.unshift(mv);
+    return mv;
+  }
+
+
+  // ---------- autenticação ----------
+
+  function hashPass(str) {
+    str = String(str == null ? "" : str);
+    var h = 5381;
+    for (var i = 0; i < str.length; i++) {
+      h = ((h * 33) ^ str.charCodeAt(i)) >>> 0;
+    }
+    return h.toString(16) + "_" + str.length.toString(16);
+  }
+
+  async function loadUsers() {
+    var res = await supabaseClient.from("users").select("*").order("created_at");
+    if (res.error) { state.globalError = "Não foi possível carregar os usuários: " + res.error.message; state.users = []; return; }
+    state.users = (res.data || []).map(mapUserFromDb);
+  }
+
+  function mapUserFromDb(row) {
+    return { id: row.id, username: row.username, passwordHash: row.password_hash, role: row.role, createdAt: row.created_at };
+  }
+
+  function findUserByUsername(username) {
+    var uname = String(username == null ? "" : username).trim().toLowerCase();
+    for (var i = 0; i < state.users.length; i++) {
+      if (state.users[i].username.toLowerCase() === uname) return state.users[i];
+    }
+    return null;
+  }
+
+  function findUserById(id) {
+    for (var i = 0; i < state.users.length; i++) if (state.users[i].id === id) return state.users[i];
+    return null;
+  }
+
+  function loadSession() {
+    state.currentUser = null;
+    try {
+      var raw = localStorage.getItem(SESSION_KEY);
+      var username = raw ? JSON.parse(raw).username : null;
+      if (username) state.currentUser = findUserByUsername(username) || null;
+    } catch (e) { state.currentUser = null; }
+  }
+
+  function persistSession() {
+    try {
+      if (state.currentUser) localStorage.setItem(SESSION_KEY, JSON.stringify({ username: state.currentUser.username }));
+      else localStorage.removeItem(SESSION_KEY);
+    } catch (e) {}
+  }
+
+  function isAdmin() { return !!(state.currentUser && state.currentUser.role === "admin"); }
+  function canEditItems() { return !!(state.currentUser && (state.currentUser.role === "admin" || state.currentUser.role === "editor")); }
+  function canDeleteItems() { return isAdmin(); }
+
+  function doLogin() {
+    var userEl = document.getElementById("login-user");
+    var passEl = document.getElementById("login-pass");
+    var username = userEl ? userEl.value.trim() : "";
+    var pass = passEl ? passEl.value : "";
+    if (!username || !pass) {
+      state.loginError = "Informe usuário e senha.";
+      render();
+      return;
+    }
+    var u = findUserByUsername(username);
+    if (!u || u.passwordHash !== hashPass(pass)) {
+      state.loginError = "Usuário ou senha inválidos.";
+      render();
+      return;
+    }
+    state.currentUser = u;
+    state.loginError = "";
+    state.activeTab = "dashboard";
+    persistSession();
+    render();
+  }
+
+  function doLogout() {
+    state.currentUser = null;
+    state.activeTab = "dashboard";
+    state.adding = false;
+    state.editingId = null;
+    state.addingUser = false;
+    state.editingUserId = null;
+    state.passwordError = "";
+    state.passwordSuccess = false;
+    persistSession();
+    render();
+  }
+
+  async function doChangePassword() {
+    if (!state.currentUser) return;
+    var cur = (document.getElementById("chpwd-current") || {}).value || "";
+    var nw = (document.getElementById("chpwd-new") || {}).value || "";
+    var conf = (document.getElementById("chpwd-confirm") || {}).value || "";
+    state.passwordSuccess = false;
+    if (hashPass(cur) !== state.currentUser.passwordHash) {
+      state.passwordError = "Senha atual incorreta.";
+      render();
+      return;
+    }
+    if (!nw || nw.length < 4) {
+      state.passwordError = "A nova senha deve ter ao menos 4 caracteres.";
+      render();
+      return;
+    }
+    if (nw !== conf) {
+      state.passwordError = "As senhas novas não coincidem.";
+      render();
+      return;
+    }
+    state.saving = true; render();
+    var newHash = hashPass(nw);
+    var res = await supabaseClient.from("users").update({ password_hash: newHash }).eq("id", state.currentUser.id);
+    state.saving = false;
+    if (res.error) {
+      state.passwordError = "Não foi possível salvar a nova senha: " + res.error.message;
+      render();
+      return;
+    }
+    var u = findUserById(state.currentUser.id);
+    if (u) { u.passwordHash = newHash; state.currentUser = u; }
+    state.passwordError = "";
+    state.passwordSuccess = true;
+    render();
+  }
+
+  // ---------- planilhas Excel ----------
+
+  function safeSheetName(name, used) {
+    var s = String(name == null ? "" : name).replace(/[\\\/\?\*\[\]:]/g, "").trim();
+    if (!s) s = "Categoria";
+    if (s.length > 31) s = s.slice(0, 31);
+    var base = s, n = 2;
+    while (used[s]) {
+      var suf = "-" + n;
+      s = base.slice(0, 31 - suf.length) + suf;
+      n++;
+    }
+    return s;
+  }
+
+  function exportExcel() {
+    if (typeof XLSX === "undefined") {
+      state.importMsg = { type: "error", text: "Não foi possível carregar a biblioteca de Excel. Verifique sua conexão com a internet e tente novamente." };
+      render();
+      return;
+    }
+    var wb = XLSX.utils.book_new();
+    var catRows = state.categories.map(function (c) { return { Categoria: c.label, Cor: c.color }; });
+    var catWs = XLSX.utils.json_to_sheet(catRows.length ? catRows : [{ Categoria: "", Cor: "" }]);
+    XLSX.utils.book_append_sheet(wb, catWs, "Categorias");
+
+    var usedNames = { "Categorias": true };
+    state.categories.forEach(function (c) {
+      var items = state.items.filter(function (it) { return it.category === c.key; });
+      var rows = items.map(function (it) {
+        return {
+          "Nome": it.name,
+          "Unidade": it.unit,
+          "Quantidade atual": Number(it.qty) || 0,
+          "Nível baixo até": Number(it.min) || 0,
+          "Nível OK a partir de": Number(it.ideal) || 0,
+          "Valor médio (R$)": Number(it.avgCost) || 0
+        };
+      });
+      var ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ "Nome": "", "Unidade": "", "Quantidade atual": "", "Nível baixo até": "", "Nível OK a partir de": "", "Valor médio (R$)": "" }]);
+      var sheetName = safeSheetName(c.label, usedNames);
+      usedNames[sheetName] = true;
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    });
+
+    try {
+      XLSX.writeFile(wb, "controle-de-estoque.xlsx");
+    } catch (e) {
+      state.importMsg = { type: "error", text: "Não foi possível gerar o arquivo Excel." };
+      render();
+    }
+  }
+
+  function handleImportFile(file) {
+    if (typeof XLSX === "undefined") {
+      state.importMsg = { type: "error", text: "Não foi possível carregar a biblioteca de Excel. Verifique sua conexão com a internet e tente novamente." };
+      render();
+      return;
+    }
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      try {
+        var data = new Uint8Array(e.target.result);
+        var wb = XLSX.read(data, { type: "array" });
+        importWorkbook(wb);
+      } catch (err) {
+        state.importMsg = { type: "error", text: "Não foi possível ler o arquivo. Verifique se é uma planilha Excel válida." };
+        render();
+      }
+    };
+    reader.onerror = function () {
+      state.importMsg = { type: "error", text: "Não foi possível ler o arquivo." };
+      render();
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  async function importWorkbook(wb) {
+    var stats = { categoriasNovas: 0, itensNovos: 0, itensAtualizados: 0, linhasIgnoradas: 0 };
+    var admin = isAdmin();
+    var newItemRows = [];
+    var updateOps = [];
+
+    if (wb.SheetNames.indexOf("Categorias") !== -1) {
+      var catRows = XLSX.utils.sheet_to_json(wb.Sheets["Categorias"], { defval: "" });
+      for (var ci = 0; ci < catRows.length; ci++) {
+        var row0 = catRows[ci];
+        var label = String(row0["Categoria"] || "").trim();
+        if (!label) continue;
+        if (findCategoryByLabel(label)) continue;
+        if (!admin) { stats.linhasIgnoradas++; continue; }
+        var color = String(row0["Cor"] || "").trim();
+        if (!/^#[0-9a-fA-F]{6}$/.test(color)) color = "#6B7280";
+        var newCat = { key: uniqueCategoryKey(slugify(label)), label: label, color: color };
+        var catRes = await insertCategory(newCat);
+        if (!catRes.error) { state.categories.push(newCat); stats.categoriasNovas++; }
+      }
+    }
+
+    for (var si = 0; si < wb.SheetNames.length; si++) {
+      var sheetName = wb.SheetNames[si];
+      if (sheetName === "Categorias") continue;
+      var cat = findCategoryByLabel(sheetName);
+      if (!cat) {
+        if (!admin) { stats.linhasIgnoradas++; continue; }
+        cat = { key: uniqueCategoryKey(slugify(sheetName)), label: sheetName, color: "#6B7280" };
+        var catRes2 = await insertCategory(cat);
+        if (catRes2.error) { stats.linhasIgnoradas++; continue; }
+        state.categories.push(cat);
+        stats.categoriasNovas++;
+      }
+      var rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: "" });
+      for (var ri = 0; ri < rows.length; ri++) {
+        var row = rows[ri];
+        var name = String(row["Nome"] || "").trim();
+        if (!name) { stats.linhasIgnoradas++; continue; }
+        var unit = String(row["Unidade"] || "un").trim() || "un";
+        var qty = Number(row["Quantidade atual"]) || 0;
+        var min = Number(row["Nível baixo até"]) || 0;
+        var ideal = Number(row["Nível OK a partir de"]) || 0;
+        var importedAvgCost = Number(row["Valor médio (R$)"]) || 0;
+        var existingItem = null;
+        for (var i = 0; i < state.items.length; i++) {
+          if (state.items[i].category === cat.key && state.items[i].name.trim().toLowerCase() === name.toLowerCase()) { existingItem = state.items[i]; break; }
+        }
+        if (existingItem) {
+          updateOps.push(supabaseClient.from("items").update({ unit: unit, qty: qty, min: min, ideal: ideal }).eq("id", existingItem.id).then(function (res) {
+            if (!res.error) stats.itensAtualizados++; else stats.linhasIgnoradas++;
+          }));
+          existingItem.unit = unit; existingItem.qty = qty; existingItem.min = min; existingItem.ideal = ideal;
+        } else {
+          newItemRows.push({ jsItem: { id: uid(), category: cat.key, name: name, unit: unit, qty: qty, min: min, ideal: ideal, avgCost: importedAvgCost } });
+        }
+      }
+    }
+
+    if (newItemRows.length) {
+      var dbRows = newItemRows.map(function (n) {
+        return { id: n.jsItem.id, category: n.jsItem.category, name: n.jsItem.name, unit: n.jsItem.unit, qty: n.jsItem.qty, min: n.jsItem.min, ideal: n.jsItem.ideal, avg_cost: n.jsItem.avgCost };
+      });
+      var insertRes = await supabaseClient.from("items").insert(dbRows);
+      if (!insertRes.error) {
+        newItemRows.forEach(function (n) { state.items.push(n.jsItem); stats.itensNovos++; });
+      } else {
+        stats.linhasIgnoradas += newItemRows.length;
+      }
+    }
+    await Promise.all(updateOps);
+
+    var parts = [];
+    if (stats.categoriasNovas) parts.push(stats.categoriasNovas + " categoria(s) criada(s)");
+    parts.push(stats.itensNovos + " item(ns) criado(s)");
+    parts.push(stats.itensAtualizados + " item(ns) atualizado(s)");
+    if (stats.linhasIgnoradas) parts.push(stats.linhasIgnoradas + " linha(s) ignorada(s)");
+    state.importMsg = { type: "success", text: "Importação concluída: " + parts.join(", ") + "." };
+    render();
+  }
+
+  function timeStr(d) {
+    if (!d) return "";
+    return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  }
+
+  // ---------- rendering ----------
+
+  function statusBadge(status) {
+    var m = STATUS_META[status];
+    return '<span class="est-badge" style="color:' + m.color + ';background:' + m.bg + '">' + m.label + "</span>";
+  }
+
+  function categoryFormHTML() {
+    return '<div class="est-form">' +
+      (state.categoryFormError ? '<div class="est-login-msg est-login-error">' + esc(state.categoryFormError) + '</div>' : '') +
+      '<div class="est-form-grid">' +
+      '<div class="est-field" style="flex-basis:60%"><label class="est-label">Nome da categoria</label><input class="est-input" id="cf-name" placeholder="Ex.: Ferramentas"/></div>' +
+      '<div class="est-field" style="flex-basis:90px;min-width:70px"><label class="est-label">Cor</label><input class="est-input" type="color" id="cf-color" value="#4F46E5" style="padding:2px;height:33px"/></div>' +
+      "</div>" +
+      '<div style="display:flex;gap:8px">' +
+      '<button class="est-btn est-btn-primary" data-action="save-category">' + ICON.check + " Salvar</button>" +
+      '<button class="est-btn" data-action="cancel-category-form">' + ICON.x + " Cancelar</button>" +
+      "</div></div>";
+  }
+
+  function renderDashboard(items, navigable) {
+    var counts = { baixo: 0, medio: 0, ok: 0 };
+    items.forEach(function (it) { counts[getStatus(it)]++; });
+
+    var byCat = {};
+    state.categories.forEach(function (c) { byCat[c.key] = { baixo: 0, medio: 0, ok: 0, total: 0 }; });
+    items.forEach(function (it) {
+      if (!byCat[it.category]) return;
+      byCat[it.category][getStatus(it)]++;
+      byCat[it.category].total++;
+    });
+
+    var tiles =
+      '<div class="est-tiles">' +
+      '<div class="est-tile" style="border-left-color:' + STATUS_META.baixo.color + '"><div class="est-tile-num est-num" style="color:' + STATUS_META.baixo.color + '">' + counts.baixo + '</div><div class="est-tile-label">Itens em nível baixo</div></div>' +
+      '<div class="est-tile" style="border-left-color:' + STATUS_META.medio.color + '"><div class="est-tile-num est-num" style="color:' + STATUS_META.medio.color + '">' + counts.medio + '</div><div class="est-tile-label">Itens em nível médio</div></div>' +
+      '<div class="est-tile" style="border-left-color:' + STATUS_META.ok.color + '"><div class="est-tile-num est-num" style="color:' + STATUS_META.ok.color + '">' + counts.ok + '</div><div class="est-tile-label">Itens no nível OK</div></div>' +
+      "</div>";
+
+    var catGridHeader = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">' +
+      '<h2 class="est-h2" style="margin:0">Por categoria</h2>' +
+      (navigable && isAdmin() && !state.addingCategory ? '<button class="est-btn" data-action="show-add-category">' + ICON.plus + " Nova categoria</button>" : "") +
+      "</div>";
+
+    var categoryFormBlock = (navigable && isAdmin() && state.addingCategory) ? categoryFormHTML() : "";
+
+    var catGrid = catGridHeader + categoryFormBlock + '<div class="est-catgrid">' +
+      state.categories.map(function (c) {
+        var d = byCat[c.key] || { baixo: 0, medio: 0, ok: 0, total: 0 };
+        return '<div class="est-catcard" ' + (navigable ? 'data-action="goto-cat" data-cat="' + c.key + '"' : "") +
+          ' style="cursor:' + (navigable ? "pointer" : "default") + '">' +
+          '<div class="est-catcard-top"><span class="est-dot" style="background:' + c.color + '"></span>' + esc(c.label) + "</div>" +
+          '<div class="est-catcard-counts est-num">' +
+          '<span style="color:' + STATUS_META.baixo.color + '">' + d.baixo + "</span>" +
+          '<span style="color:' + STATUS_META.medio.color + '">' + d.medio + "</span>" +
+          '<span style="color:' + STATUS_META.ok.color + '">' + d.ok + "</span>" +
+          '<span style="color:#B4B8C0">· ' + d.total + " itens</span>" +
+          "</div></div>";
+      }).join("") + "</div>";
+
+    var importBanner = (navigable && state.importMsg) ?
+      ('<div class="est-login-msg ' + (state.importMsg.type === "error" ? "est-login-error" : "est-login-success") + '" style="margin-bottom:14px">' + esc(state.importMsg.text) + "</div>") : "";
+
+    var excelBar = navigable ?
+      ('<div class="est-toolbar">' +
+      '<button class="est-btn" data-action="export-excel">' + ICON.download + " Exportar Excel</button>" +
+      (canEditItems() ? '<button class="est-btn" data-action="trigger-import">' + ICON.upload + " Importar Excel</button>" : "") +
+      '<input type="file" id="import-file" accept=".xlsx,.xls" style="display:none"/>' +
+      "</div>") : "";
+
+    var toolbar =
+      importBanner + excelBar +
+      '<h2 class="est-h2">Itens</h2><div class="est-toolbar">' +
+      '<div class="est-search">' + ICON.search + '<input id="dash-search" placeholder="Buscar item…" oninput="App.filterDashboard()"/></div>' +
+      '<select class="est-select" id="dash-filter" onchange="App.filterDashboard()">' +
+      '<option value="all">Todas as categorias</option>' +
+      state.categories.map(function (c) { return '<option value="' + c.key + '">' + esc(c.label) + "</option>"; }).join("") +
+      "</select></div>" +
+      '<div id="items-list"></div>';
+
+    return '<div>' + tiles + catGrid + toolbar + "</div>";
+  }
+
+  function renderItemsListHTML(items) {
+    var search = (document.getElementById("dash-search") || {}).value || "";
+    var filterCat = (document.getElementById("dash-filter") || {}).value || "all";
+    var order = { baixo: 0, medio: 1, ok: 2 };
+
+    var filtered = items
+      .filter(function (it) { return filterCat === "all" ? true : it.category === filterCat; })
+      .filter(function (it) { return it.name.toLowerCase().indexOf(search.toLowerCase()) !== -1; })
+      .sort(function (a, b) {
+        return order[getStatus(a)] - order[getStatus(b)] || a.name.localeCompare(b.name);
+      });
+
+    if (filtered.length === 0) return '<div class="est-empty">Nenhum item encontrado.</div>';
+
+    return filtered.map(function (it) {
+      var cat = catMeta(it.category);
+      return '<div class="est-row">' +
+        '<span class="est-dot" style="background:' + cat.color + '"></span>' +
+        '<div style="flex:1"><div class="est-row-name">' + esc(it.name) + '</div><div class="est-row-meta">' + esc(cat.label) + "</div></div>" +
+        '<div class="est-num" style="font-size:13.5px;min-width:70px;text-align:right">' + (Number(it.qty) || 0) + " " + esc(it.unit) + "</div>" +
+        statusBadge(getStatus(it)) +
+        "</div>";
+    }).join("");
+  }
+
+  function itemFormHTML(categoryKey, initial) {
+    var v = initial || { name: "", unit: "un", qty: 0, min: 0, ideal: 0 };
+    var qtyBlock = initial ?
+      '<div class="est-field"><label class="est-label">Estoque atual</label><input class="est-input" value="' + (Number(v.qty) || 0) + " " + esc(v.unit) + '" disabled/></div>' :
+      '<div class="est-field"><label class="est-label">Quantidade inicial</label><input class="est-input" type="number" min="0" step="0.01" id="if-qty" value="' + esc(v.qty) + '"/></div>' +
+      '<div class="est-field"><label class="est-label">Valor unitário inicial (R$)</label><input class="est-input" type="number" min="0" step="0.01" id="if-value" placeholder="0,00"/></div>';
+    var hint = initial ? '<div class="est-row-meta" style="margin-bottom:10px">A quantidade em estoque só muda por registros de Entrada/Saída, para manter o histórico rastreável.</div>' : "";
+    var errBlock = state.itemFormError ? ('<div class="est-login-msg est-login-error">' + esc(state.itemFormError) + "</div>") : "";
+    return '<div class="est-form">' + errBlock +
+      '<div class="est-form-grid">' +
+      '<div class="est-field" style="flex-basis:100%"><label class="est-label">Nome do item</label>' +
+      '<input class="est-input" id="if-name" value="' + esc(v.name) + '" placeholder="Ex.: Papel toalha"/></div>' +
+      '<div class="est-field"><label class="est-label">Unidade</label><input class="est-input" id="if-unit" value="' + esc(v.unit) + '" placeholder="un, kg, cx…"/></div>' +
+      qtyBlock +
+      '<div class="est-field"><label class="est-label">Nível baixo até</label><input class="est-input" type="number" id="if-min" value="' + esc(v.min) + '"/></div>' +
+      '<div class="est-field"><label class="est-label">Nível OK a partir de</label><input class="est-input" type="number" id="if-ideal" value="' + esc(v.ideal) + '"/></div>' +
+      "</div>" + hint +
+      '<div style="display:flex;gap:8px">' +
+      '<button class="est-btn est-btn-primary" data-action="save-item" data-cat="' + categoryKey + '" data-id="' + (initial ? initial.id : "") + '">' + ICON.check + " Salvar</button>" +
+      '<button class="est-btn" data-action="cancel-form">' + ICON.x + " Cancelar</button>" +
+      "</div></div>";
+  }
+
+  function movementFormHTML(item, type) {
+    var nowVal = toDatetimeLocalValue(new Date());
+    var errorBlock = state.movementError ? ('<div class="est-login-msg est-login-error">' + esc(state.movementError) + "</div>") : "";
+    var fields;
+    if (type === "entrada") {
+      fields =
+        '<div class="est-field"><label class="est-label">Quantidade</label><input class="est-input" type="number" min="0.01" step="0.01" id="mv-qty" placeholder="0"/></div>' +
+        '<div class="est-field"><label class="est-label">Valor unitário (R$)</label><input class="est-input" type="number" min="0" step="0.01" id="mv-value" placeholder="0,00"/></div>' +
+        '<div class="est-field"><label class="est-label">Data e hora</label><input class="est-input" type="datetime-local" id="mv-datetime" value="' + nowVal + '"/></div>';
+    } else {
+      fields =
+        '<div class="est-field"><label class="est-label">Quantidade</label><input class="est-input" type="number" min="0.01" step="0.01" id="mv-qty" placeholder="0"/></div>' +
+        '<div class="est-field"><label class="est-label">Nomeação da retirada</label><input class="est-input" id="mv-name" placeholder="Ex.: Manutenção, nome de quem retirou…"/></div>' +
+        '<div class="est-field"><label class="est-label">Filial</label><select class="est-select" id="mv-branch" style="width:100%">' +
+        state.branches.map(function (b) { return '<option value="' + b.key + '">' + esc(b.label) + "</option>"; }).join("") +
+        "</select></div>" +
+        '<div class="est-field"><label class="est-label">Data e hora</label><input class="est-input" type="datetime-local" id="mv-datetime" value="' + nowVal + '"/></div>';
+    }
+    return '<div class="est-form">' + errorBlock +
+      '<div class="est-form-grid">' + fields + "</div>" +
+      '<div class="est-row-meta" style="margin-bottom:10px">Estoque atual: ' + (Number(item.qty) || 0) + " " + esc(item.unit) +
+      (type === "saida" ? " · Custo médio: " + brl(item.avgCost) : "") +
+      " · Registrado por " + esc(state.currentUser ? state.currentUser.username : "-") + "</div>" +
+      '<div style="display:flex;gap:8px">' +
+      '<button class="est-btn est-btn-primary" data-action="save-movement" data-id="' + item.id + '">' + ICON.check + (type === "entrada" ? " Registrar entrada" : " Registrar saída") + "</button>" +
+      '<button class="est-btn" data-action="cancel-movement">' + ICON.x + " Cancelar</button>" +
+      "</div></div>";
+  }
+
+  function renderCategoryPage(categoryKey) {
+    var cat = catMeta(categoryKey);
+    var list = state.items.filter(function (it) { return it.category === categoryKey; });
+
+    var header = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">' +
+      '<div style="display:flex;align-items:center;gap:8px"><span class="est-dot" style="width:12px;height:12px;background:' + cat.color + '"></span>' +
+      '<h2 class="est-h2" style="margin:0">' + esc(cat.label) + "</h2></div>" +
+      (!state.adding && canEditItems() ? '<button class="est-btn est-btn-primary" data-action="show-add">' + ICON.plus + " Novo item</button>" : "") +
+      "</div>";
+
+    var formBlock = (state.adding && canEditItems()) ? itemFormHTML(categoryKey, null) : "";
+
+    var rows;
+    if (list.length === 0 && !state.adding) {
+      rows = '<div class="est-empty">Nenhum item cadastrado em ' + esc(cat.label.toLowerCase()) + " ainda.</div>";
+    } else {
+      rows = list.map(function (it) {
+        if (state.editingId === it.id && canEditItems()) return itemFormHTML(categoryKey, it);
+        if (state.movementItemId === it.id && canEditItems()) return movementFormHTML(it, state.movementType);
+        var moveBtns = canEditItems() ?
+          ('<div style="display:flex;gap:4px">' +
+          '<button class="est-btn est-btn-ghost" data-action="show-entrada" data-id="' + it.id + '" title="Registrar entrada">' + ICON.arrowIn + " Entrada</button>" +
+          '<button class="est-btn est-btn-ghost" data-action="show-saida" data-id="' + it.id + '" title="Registrar saída">' + ICON.arrowOut + " Saída</button>" +
+          "</div>") : "";
+        var editBtn = canEditItems() ? ('<button class="est-btn est-btn-ghost" data-action="edit-item" data-id="' + it.id + '" title="Editar">' + ICON.edit + "</button>") : "";
+        var delBtn = canDeleteItems() ? ('<button class="est-btn est-btn-ghost" data-action="delete-item" data-id="' + it.id + '" title="Excluir">' + ICON.trash + "</button>") : "";
+        return '<div class="est-row" data-row-id="' + it.id + '">' +
+          '<div style="flex:1"><div class="est-row-name">' + esc(it.name) + '</div><div class="est-row-meta est-num">' + (Number(it.qty) || 0) + " " + esc(it.unit) +
+          (isAdmin() ? " · custo méd. " + brl(it.avgCost) : "") + "</div></div>" +
+          statusBadge(getStatus(it)) +
+          moveBtns + editBtn + delBtn +
+          "</div>";
+      }).join("");
+    }
+
+    return header + formBlock + "<div>" + rows + "</div>";
+  }
+
+  function renderLogin() {
+    return '<div class="est-login-wrap"><div class="est-login-card">' +
+      '<div class="est-login-logo">' + LOGO_SVG + '</div>' +
+      '<div class="est-login-title">Controle de Estoque</div>' +
+      '<div class="est-login-sub">Entre com seu usuário e senha</div>' +
+      (state.loginError ? '<div class="est-login-msg est-login-error">' + esc(state.loginError) + '</div>' : '') +
+      '<div class="est-login-field"><label class="est-label">Usuário</label><input class="est-input" id="login-user" autocomplete="username"/></div>' +
+      '<div class="est-login-field"><label class="est-label">Senha</label><input class="est-input" type="password" id="login-pass" autocomplete="current-password"/></div>' +
+      '<button class="est-btn est-btn-primary est-login-btn" data-action="login-submit">Entrar</button>' +
+      '</div></div>';
+  }
+
+  function userFormHTML(initial) {
+    var v = initial || { username: "", role: "editor" };
+    return '<div class="est-form">' +
+      (state.userFormError ? '<div class="est-login-msg est-login-error">' + esc(state.userFormError) + '</div>' : '') +
+      '<div class="est-form-grid">' +
+      '<div class="est-field"><label class="est-label">Usuário</label><input class="est-input" id="uf-username" value="' + esc(v.username) + '" placeholder="nome de usuário"' + (initial ? " disabled" : "") + '/></div>' +
+      '<div class="est-field"><label class="est-label">Perfil</label><select class="est-select" id="uf-role" style="width:100%">' +
+      '<option value="editor"' + (v.role === "editor" ? " selected" : "") + '>Editor (edita e lança itens)</option>' +
+      '<option value="admin"' + (v.role === "admin" ? " selected" : "") + '>Administrador (gerencia usuários)</option>' +
+      "</select></div>" +
+      '<div class="est-field"><label class="est-label">' + (initial ? "Nova senha (opcional)" : "Senha") + '</label><input class="est-input" type="password" id="uf-password" placeholder="' + (initial ? "deixe em branco para manter" : "senha") + '"/></div>' +
+      "</div>" +
+      '<div style="display:flex;gap:8px">' +
+      '<button class="est-btn est-btn-primary" data-action="save-user" data-id="' + (initial ? initial.id : "") + '">' + ICON.check + " Salvar</button>" +
+      '<button class="est-btn" data-action="cancel-user-form">' + ICON.x + " Cancelar</button>" +
+      "</div></div>";
+  }
+
+  function renderUsersPage() {
+    var header = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">' +
+      '<h2 class="est-h2" style="margin:0">Usuários</h2>' +
+      (!state.addingUser ? '<button class="est-btn est-btn-primary" data-action="show-add-user">' + ICON.plus + " Novo usuário</button>" : "") +
+      "</div>";
+
+    var formBlock = state.addingUser ? userFormHTML(null) : "";
+
+    var rows;
+    if (state.users.length === 0 && !state.addingUser) {
+      rows = '<div class="est-empty">Nenhum usuário cadastrado.</div>';
+    } else {
+      rows = state.users.map(function (u) {
+        if (state.editingUserId === u.id) return userFormHTML(u);
+        var isSelf = state.currentUser && state.currentUser.id === u.id;
+        return '<div class="est-row">' +
+          '<div style="flex:1"><div class="est-row-name">' + esc(u.username) + (isSelf ? ' <span style="color:#8A8F98;font-weight:400">(você)</span>' : "") + "</div>" +
+          '<div class="est-row-meta">Criado em ' + esc(new Date(u.createdAt).toLocaleDateString("pt-BR")) + "</div></div>" +
+          '<span class="est-role-badge">' + (u.role === "admin" ? "Administrador" : "Editor") + "</span>" +
+          '<button class="est-btn est-btn-ghost" data-action="edit-user" data-id="' + u.id + '" title="Editar">' + ICON.edit + "</button>" +
+          (!isSelf ? '<button class="est-btn est-btn-ghost" data-action="delete-user" data-id="' + u.id + '" title="Excluir">' + ICON.trash + "</button>" : "") +
+          "</div>";
+      }).join("");
+    }
+
+    return header + formBlock + "<div>" + rows + "</div>";
+  }
+
+  function changePasswordFormHTML() {
+    return '<div class="est-form">' +
+      (state.passwordError ? '<div class="est-login-msg est-login-error">' + esc(state.passwordError) + '</div>' : '') +
+      (state.passwordSuccess ? '<div class="est-login-msg est-login-success">Senha alterada com sucesso.</div>' : "") +
+      '<div class="est-form-grid">' +
+      '<div class="est-field"><label class="est-label">Senha atual</label><input class="est-input" type="password" id="chpwd-current"/></div>' +
+      '<div class="est-field"><label class="est-label">Nova senha</label><input class="est-input" type="password" id="chpwd-new"/></div>' +
+      '<div class="est-field"><label class="est-label">Confirmar nova senha</label><input class="est-input" type="password" id="chpwd-confirm"/></div>' +
+      "</div>" +
+      '<div style="display:flex;gap:8px">' +
+      '<button class="est-btn est-btn-primary" data-action="save-password">' + ICON.check + " Salvar nova senha</button>" +
+      "</div></div>";
+  }
+
+  function renderAdminPage() {
+    var pwdSection = '<div style="margin-bottom:30px">' +
+      '<h2 class="est-h2" style="margin:0 0 4px">Minha conta</h2>' +
+      '<div class="est-row-meta" style="margin-bottom:12px">Usuário: <b>' + esc(state.currentUser.username) + '</b> · ' + (isAdmin() ? "Administrador" : "Editor") + "</div>" +
+      changePasswordFormHTML() +
+      "</div>";
+
+    if (!isAdmin()) return pwdSection;
+
+    return pwdSection + '<div style="border-top:1px solid #E5E7EB;padding-top:22px">' + renderUsersPage() + "</div>";
+  }
+
+  // ---------- relatórios ----------
+
+  function branchFormHTML() {
+    return '<div class="est-form">' +
+      (state.branchFormError ? '<div class="est-login-msg est-login-error">' + esc(state.branchFormError) + '</div>' : '') +
+      '<div class="est-form-grid">' +
+      '<div class="est-field"><label class="est-label">Nome da filial</label><input class="est-input" id="bf-name" placeholder="Ex.: Leaf 3"/></div>' +
+      "</div>" +
+      '<div style="display:flex;gap:8px">' +
+      '<button class="est-btn est-btn-primary" data-action="save-branch">' + ICON.check + " Salvar</button>" +
+      '<button class="est-btn" data-action="cancel-branch-form">' + ICON.x + " Cancelar</button>" +
+      "</div></div>";
+  }
+
+  function matchesReportFilters(mv, f) {
+    var d = localDateKey(new Date(mv.occurredAt));
+    if (f.from && d < f.from) return false;
+    if (f.to && d > f.to) return false;
+    if (f.categoria && f.categoria !== "all" && mv.categoryKey !== f.categoria) return false;
+    if (f.tipo && f.tipo !== "all" && mv.type !== f.tipo) return false;
+    if (f.filial && f.filial !== "all" && mv.type === "saida" && mv.branch !== f.filial) return false;
+    return true;
+  }
+
+  function defaultReportFilters() {
+    return { from: firstDayOfMonthKey(), to: todayKey(), filial: "all", categoria: "all", tipo: "all" };
+  }
+
+  function readReportFilters() {
+    return {
+      from: (document.getElementById("rep-from") || {}).value || "",
+      to: (document.getElementById("rep-to") || {}).value || "",
+      filial: (document.getElementById("rep-filial") || {}).value || "all",
+      categoria: (document.getElementById("rep-categoria") || {}).value || "all",
+      tipo: (document.getElementById("rep-tipo") || {}).value || "all"
+    };
+  }
+
+  function movementRowHTML(mv) {
+    var cat = catMeta(mv.categoryKey);
+    var isEntrada = mv.type === "entrada";
+    var detail = isEntrada ?
+      ("Valor unit. " + brl(mv.unitValue)) :
+      (esc((findBranchByKey(mv.branch) || {}).label || mv.branch) + " · " + esc(mv.withdrawalName || ""));
+    var delBtn = isAdmin() ? ('<button class="est-btn est-btn-ghost" data-action="delete-movement" data-id="' + mv.id + '" title="Excluir movimentação (com rastreio)">' + ICON.trash + "</button>") : "";
+    return '<div class="est-row">' +
+      (isEntrada ? ICON.arrowIn : ICON.arrowOut) +
+      '<div style="flex:1"><div class="est-row-name">' + esc(mv.itemName) + " <span style=\"font-weight:400;color:#8A8F98\">· " + esc(cat.label) + "</span></div>" +
+      '<div class="est-row-meta">' + fmtDateTime(mv.occurredAt) + " · " + detail + " · por " + esc(mv.registeredBy) + "</div></div>" +
+      '<div class="est-num" style="text-align:right;min-width:90px">' + mv.qty + " " + esc(mv.unit) + '<br/><span style="color:#8A8F98">' + brl(mv.totalValue) + "</span></div>" +
+      delBtn +
+      "</div>";
+  }
+
+  function reportContentHTML(f) {
+    var filters = f || readReportFilters();
+    var filtered = state.movements.filter(function (mv) { return matchesReportFilters(mv, filters); });
+
+    var totalGasto = 0, totalInvestido = 0;
+    var byFilial = {};
+    state.branches.forEach(function (b) { byFilial[b.key] = { label: b.label, qty: 0, valor: 0 }; });
+    filtered.forEach(function (mv) {
+      if (mv.type === "saida") {
+        totalGasto += mv.totalValue;
+        if (byFilial[mv.branch]) { byFilial[mv.branch].qty += mv.qty; byFilial[mv.branch].valor += mv.totalValue; }
+      } else {
+        totalInvestido += mv.totalValue;
+      }
+    });
+
+    var tiles = '<div class="est-tiles">' +
+      '<div class="est-tile" style="border-left-color:#DC2626"><div class="est-tile-num est-num" style="color:#DC2626">' + brl(totalGasto) + '</div><div class="est-tile-label">Total gasto (saídas)</div></div>' +
+      '<div class="est-tile" style="border-left-color:#16A34A"><div class="est-tile-num est-num" style="color:#16A34A">' + brl(totalInvestido) + '</div><div class="est-tile-label">Total investido (entradas)</div></div>' +
+      '<div class="est-tile" style="border-left-color:#4F46E5"><div class="est-tile-num est-num" style="color:#4F46E5">' + filtered.length + '</div><div class="est-tile-label">Movimentações no período</div></div>' +
+      "</div>";
+
+    var filialRows = state.branches.map(function (b) {
+      var d = byFilial[b.key];
+      return '<div class="est-row"><div style="flex:1"><div class="est-row-name">' + esc(b.label) + "</div></div>" +
+        '<div class="est-num" style="min-width:110px;text-align:right">' + d.qty.toFixed(2).replace(/\.00$/, "") + " itens</div>" +
+        '<div class="est-num" style="min-width:110px;text-align:right;font-weight:600">' + brl(d.valor) + "</div></div>";
+    }).join("");
+    var filialTable = '<h2 class="est-h2">Gasto por filial</h2>' + (state.branches.length ? filialRows : '<div class="est-empty">Nenhuma filial cadastrada.</div>');
+
+    var history = filtered.slice().sort(function (a, b) { return new Date(b.occurredAt) - new Date(a.occurredAt); });
+    var shown = history.slice(0, 100);
+    var historyBlock = '<h2 class="est-h2">Histórico de movimentações</h2>' +
+      (shown.length ? shown.map(movementRowHTML).join("") : '<div class="est-empty">Nenhuma movimentação encontrada para o período/filtro selecionado.</div>') +
+      (history.length > 100 ? '<div class="est-readonly-note" style="margin-top:8px">Mostrando as 100 mais recentes de ' + history.length + ".</div>" : "");
+
+    return tiles + filialTable + historyBlock;
+  }
+
+  function renderReportsPage() {
+    var header = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">' +
+      '<h2 class="est-h2" style="margin:0">Relatórios</h2>' +
+      (isAdmin() && !state.addingBranch ? '<button class="est-btn" data-action="show-add-branch">' + ICON.plus + " Nova filial</button>" : "") +
+      "</div>";
+    var branchFormBlock = (isAdmin() && state.addingBranch) ? branchFormHTML() : "";
+
+    var f = defaultReportFilters();
+    var filterBar = '<div class="est-toolbar">' +
+      '<div class="est-field"><label class="est-label">De</label><input class="est-input" type="date" id="rep-from" value="' + f.from + '" onchange="App.updateReport()"/></div>' +
+      '<div class="est-field"><label class="est-label">Até</label><input class="est-input" type="date" id="rep-to" value="' + f.to + '" onchange="App.updateReport()"/></div>' +
+      '<div class="est-field"><label class="est-label">Filial</label><select class="est-select" id="rep-filial" onchange="App.updateReport()"><option value="all">Todas</option>' +
+      state.branches.map(function (b) { return '<option value="' + b.key + '">' + esc(b.label) + "</option>"; }).join("") + "</select></div>" +
+      '<div class="est-field"><label class="est-label">Categoria</label><select class="est-select" id="rep-categoria" onchange="App.updateReport()"><option value="all">Todas</option>' +
+      state.categories.map(function (c) { return '<option value="' + c.key + '">' + esc(c.label) + "</option>"; }).join("") + "</select></div>" +
+      '<div class="est-field"><label class="est-label">Tipo</label><select class="est-select" id="rep-tipo" onchange="App.updateReport()"><option value="all">Todas</option><option value="entrada">Entradas</option><option value="saida">Saídas</option></select></div>' +
+      "</div>";
+
+    return header + branchFormBlock + filterBar + '<div id="report-content">' + reportContentHTML(f) + "</div>";
+  }
+
+  // ---------- log de auditoria ----------
+
+  function msgBannerHTML(m) {
+    if (!m) return "";
+    return '<div class="est-login-msg ' + (m.type === "error" ? "est-login-error" : "est-login-success") + '">' + esc(m.text) + "</div>";
+  }
+
+  var AUDIT_ACTION_META = {
+    criado: { label: "Criado", color: "#4F46E5" },
+    entrada: { label: "Entrada", color: "#16A34A" },
+    saida: { label: "Saída", color: "#D97706" },
+    excluido: { label: "Excluído", color: "#DC2626" },
+    deleted: { label: "Excluído", color: "#DC2626" }
+  };
+
+  function auditLogRowHTML(entry) {
+    var meta = AUDIT_ACTION_META[entry.action] || { label: entry.action, color: "#6B7280" };
+    return '<div class="est-row">' +
+      '<span class="est-badge" style="color:' + meta.color + ';background:' + meta.color + '1A">' + esc(meta.label) + "</span>" +
+      '<div style="flex:1"><div class="est-row-name">' + esc(entry.description) + "</div>" +
+      '<div class="est-row-meta">' + fmtDateTime(entry.occurredAt) + " · por " + esc(entry.performedBy || "-") + "</div></div>" +
+      "</div>";
+  }
+
+  function defaultLogFilters() {
+    return { from: firstDayOfMonthKey(), to: todayKey() };
+  }
+
+  function readLogFilters() {
+    return {
+      from: (document.getElementById("log-from") || {}).value || "",
+      to: (document.getElementById("log-to") || {}).value || ""
+    };
+  }
+
+  function logContentHTML(f) {
+    var filters = f || readLogFilters();
+    var filtered = state.auditLog.filter(function (entry) {
+      var d = localDateKey(new Date(entry.occurredAt));
+      if (filters.from && d < filters.from) return false;
+      if (filters.to && d > filters.to) return false;
+      return true;
+    });
+    return filtered.length ? filtered.map(auditLogRowHTML).join("") : '<div class="est-empty">Nenhum registro de auditoria no período selecionado.</div>';
+  }
+
+  async function downloadPeriodExcel() {
+    if (typeof XLSX === "undefined") {
+      state.downloadMsg = { type: "error", text: "Não foi possível carregar a biblioteca de Excel. Verifique sua conexão com a internet e tente novamente." };
+      render();
+      return;
+    }
+    var f = readLogFilters();
+    if (!f.from || !f.to) {
+      state.downloadMsg = { type: "error", text: "Selecione o período (de/até) antes de baixar." };
+      render();
+      return;
+    }
+    var fromIso = new Date(f.from + "T00:00:00").toISOString();
+    var toIso = new Date(f.to + "T23:59:59").toISOString();
+
+    state.saving = true; render();
+    var movRes = await supabaseClient.from("movements").select("*").gte("occurred_at", fromIso).lte("occurred_at", toIso).order("occurred_at", { ascending: false });
+    var logRes = await supabaseClient.from("audit_log").select("*").gte("occurred_at", fromIso).lte("occurred_at", toIso).order("occurred_at", { ascending: false });
+    state.saving = false;
+
+    if (movRes.error || logRes.error) {
+      state.downloadMsg = { type: "error", text: "Não foi possível buscar os dados do período selecionado." };
+      render();
+      return;
+    }
+
+    var movRows = (movRes.data || []).map(function (row) {
+      return {
+        "Data/hora": fmtDateTime(row.occurred_at),
+        "Tipo": row.type === "entrada" ? "Entrada" : "Saída",
+        "Item": row.item_name, "Categoria": row.category_key, "Unidade": row.unit,
+        "Quantidade": Number(row.qty) || 0,
+        "Valor unitário (R$)": Number(row.unit_value) || 0,
+        "Valor total (R$)": Number(row.total_value) || 0,
+        "Filial": row.branch || "", "Retirada/motivo": row.withdrawal_name || "",
+        "Registrado por": row.registered_by || ""
+      };
+    });
+    var logRows = (logRes.data || []).map(function (row) {
+      return {
+        "Data/hora": fmtDateTime(row.occurred_at), "Ação": (AUDIT_ACTION_META[row.action] || {}).label || row.action,
+        "Tipo": row.entity_type, "Descrição": row.description, "Executado por": row.performed_by || ""
+      };
+    });
+
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(movRows.length ? movRows : [{ "Data/hora": "" }]), "Movimentacoes");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(logRows.length ? logRows : [{ "Data/hora": "" }]), "Log de auditoria");
+
+    try {
+      XLSX.writeFile(wb, "controle-de-estoque-" + f.from + "-a-" + f.to + ".xlsx");
+      state.downloadMsg = { type: "success", text: "Download gerado com " + movRows.length + " movimentação(ões) e " + logRows.length + " registro(s) de log." };
+    } catch (e) {
+      state.downloadMsg = { type: "error", text: "Não foi possível gerar o arquivo Excel." };
+    }
+    render();
+  }
+
+  function renderLogPage() {
+    var pct = state.dbSizeBytes != null ? (state.dbSizeBytes / DB_LIMIT_BYTES) * 100 : null;
+    var fillClass = pct == null ? "" : (pct >= 90 ? "danger" : (pct >= 80 ? "warn" : ""));
+    var storageBlock = '<div style="margin-bottom:26px">' +
+      '<h2 class="est-h2">Armazenamento (Supabase)</h2>' +
+      (pct == null ? '<div class="est-row-meta">Não foi possível obter o tamanho do banco agora.</div>' :
+        ('<div class="est-row-meta">' + (state.dbSizeBytes / (1024 * 1024)).toFixed(1) + ' MB de 500 MB usados (' + pct.toFixed(1) + '% do limite gratuito do Supabase)</div>' +
+          '<div class="est-storage-bar"><div class="est-storage-fill ' + fillClass + '" style="width:' + Math.min(100, pct).toFixed(1) + '%"></div></div>')) +
+      '<div class="est-row-meta" style="margin-top:8px">Vercel (hospedagem): como este site é 100% estático, o consumo de banda é mínimo. Não é possível checar o uso do Vercel automaticamente aqui dentro sem expor uma chave secreta no navegador — confira de vez em quando em vercel.com → seu projeto → aba Usage.</div>' +
+      "</div>";
+
+    var lf = defaultLogFilters();
+    var filterBar = '<div class="est-toolbar">' +
+      '<div class="est-field"><label class="est-label">De</label><input class="est-input" type="date" id="log-from" value="' + lf.from + '" onchange="App.updateLog()"/></div>' +
+      '<div class="est-field"><label class="est-label">Até</label><input class="est-input" type="date" id="log-to" value="' + lf.to + '" onchange="App.updateLog()"/></div>' +
+      (isAdmin() ? '<button class="est-btn" data-action="download-period">' + ICON.download + " Baixar Excel do período</button>" : "") +
+      "</div>";
+
+    var msgBlock = msgBannerHTML(state.downloadMsg) + msgBannerHTML(state.purgeMsg);
+
+    var purgeBlock = "";
+    if (isAdmin()) {
+      purgeBlock = '<div style="margin:4px 0 22px">' +
+        '<div class="est-row-meta" style="margin-bottom:8px">Apagar remove definitivamente as movimentações e os registros deste log anteriores à data escolhida (os itens do estoque não são afetados). Use isso para não lotar o limite gratuito do banco.</div>' +
+        (!state.purgeConfirmPending ?
+          ('<button class="est-btn" data-action="show-purge-confirm" style="border-color:#FCA5A5;color:#DC2626">' + ICON.trash + " Apagar dados antigos…</button>") :
+          ('<div class="est-form" style="border-color:#FCA5A5;background:#FEF2F2">' +
+            '<div class="est-field" style="max-width:220px;margin-bottom:10px"><label class="est-label">Apagar tudo anterior a</label><input class="est-input" type="date" id="purge-until" value="' + lf.to + '"/></div>' +
+            '<div style="display:flex;gap:8px">' +
+            '<button class="est-btn est-btn-primary" style="background:#DC2626;border-color:#DC2626" data-action="confirm-purge"' + (state.purging ? " disabled" : "") + '>' + ICON.check + (state.purging ? " Apagando…" : " Confirmar exclusão") + "</button>" +
+            '<button class="est-btn" data-action="cancel-purge">' + ICON.x + " Cancelar</button>" +
+            "</div></div>")) +
+        "</div>";
+    }
+
+    return storageBlock + '<h2 class="est-h2">Log de auditoria</h2>' + filterBar + msgBlock + purgeBlock + '<div id="log-list">' + logContentHTML(lf) + "</div>";
+  }
+
+  // ---------- calendário ----------
+
+  var WEEKDAY_LABELS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+  var MONTH_LABELS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+
+  function renderCalendarPage() {
+    var monthKey = state.calendarMonth || currentMonthKey();
+    var parts = monthKey.split("-");
+    var year = Number(parts[0]), month = Number(parts[1]) - 1;
+    var firstWeekday = new Date(year, month, 1).getDay();
+    var daysInMonth = new Date(year, month + 1, 0).getDate();
+
+    var dayCounts = {};
+    state.movements.forEach(function (mv) {
+      var d = new Date(mv.occurredAt);
+      var key = localDateKey(d);
+      if (key.slice(0, 7) !== monthKey) return;
+      if (!dayCounts[key]) dayCounts[key] = { entrada: 0, saida: 0 };
+      dayCounts[key][mv.type]++;
+    });
+
+    var header = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">' +
+      '<h2 class="est-h2" style="margin:0">Calendário</h2>' +
+      '<div style="display:flex;gap:8px;align-items:center">' +
+      '<button class="est-btn est-btn-ghost" data-action="cal-prev">' + ICON.back + "</button>" +
+      '<span style="font-weight:700;min-width:150px;text-align:center;display:inline-block">' + MONTH_LABELS[month] + " " + year + "</span>" +
+      '<button class="est-btn est-btn-ghost" data-action="cal-next" style="transform:rotate(180deg)">' + ICON.back + "</button>" +
+      "</div></div>";
+
+    var grid = '<div class="est-cal-grid">' +
+      WEEKDAY_LABELS.map(function (w) { return '<div class="est-cal-daylabel">' + w + "</div>"; }).join("");
+
+    for (var i = 0; i < firstWeekday; i++) grid += '<div class="est-cal-cell est-cal-cell-empty"></div>';
+    for (var day = 1; day <= daysInMonth; day++) {
+      var key = monthKey + "-" + pad2(day);
+      var c = dayCounts[key];
+      var isSelected = state.calendarSelectedDate === key;
+      var isToday = key === todayKey();
+      grid += '<div class="est-cal-cell' + (isSelected ? " active" : "") + (isToday ? " today" : "") + '" data-action="cal-select-day" data-id="' + key + '">' +
+        '<div class="est-cal-daynum">' + day + "</div>" +
+        (c ? ('<div class="est-cal-dots">' +
+          (c.entrada ? '<span class="est-cal-dot est-cal-dot-in">' + c.entrada + "</span>" : "") +
+          (c.saida ? '<span class="est-cal-dot est-cal-dot-out">' + c.saida + "</span>" : "") +
+          "</div>") : "") +
+        "</div>";
+    }
+    grid += "</div>";
+
+    var details = "";
+    if (state.calendarSelectedDate) {
+      var dayMovs = state.movements.filter(function (mv) { return localDateKey(new Date(mv.occurredAt)) === state.calendarSelectedDate; })
+        .sort(function (a, b) { return new Date(b.occurredAt) - new Date(a.occurredAt); });
+      var dParts = state.calendarSelectedDate.split("-");
+      var niceDate = dParts[2] + "/" + dParts[1] + "/" + dParts[0];
+      details = '<h2 class="est-h2">Movimentações em ' + niceDate + "</h2>" +
+        (dayMovs.length ? dayMovs.map(movementRowHTML).join("") : '<div class="est-empty">Nenhuma movimentação nesse dia.</div>');
+    }
+
+    return header + grid + '<div style="margin-top:20px">' + details + "</div>";
+  }
+
+  function renderSetupNeeded() {
+    return '<div class="est-login-wrap"><div class="est-login-card" style="max-width:460px;text-align:left">' +
+      '<div class="est-login-logo">' + LOGO_SVG + '</div>' +
+      '<div class="est-login-title" style="text-align:center">Configuração do banco pendente</div>' +
+      '<div class="est-login-sub" style="text-align:center">Este arquivo ainda não está ligado ao banco de dados compartilhado.</div>' +
+      '<div class="est-login-msg est-login-error">Abra o arquivo HTML, encontre as constantes <b>SUPABASE_URL</b> e <b>SUPABASE_ANON_KEY</b> perto do início do &lt;script&gt; e cole os valores do seu projeto Supabase (Project Settings → API).</div>' +
+      "</div></div>";
+  }
+
+  function render() {
+    var root = document.getElementById("root");
+    if (!supabaseConfigured) {
+      root.innerHTML = renderSetupNeeded();
+      return;
+    }
+    if (!forceView && !state.currentUser) {
+      root.innerHTML = renderLogin();
+      return;
+    }
+    var showDashboardOnly = forceView || state.previewView;
+
+    var topRow = "";
+    if (!showDashboardOnly && state.currentUser) {
+      topRow = '<div class="est-header-row">' +
+        '<span class="est-user-chip">' + ICON.user + " " + esc(state.currentUser.username) + "</span>" +
+        '<span class="est-role-badge">' + (isAdmin() ? "Administrador" : "Editor") + "</span>" +
+        '<button class="est-btn" data-action="logout">' + ICON.logout + " Sair</button>" +
+        "</div>";
+    }
+
+    var bottomRow = '<div class="est-header-row">';
+    if (state.lastUpdated) bottomRow += '<span class="est-readonly-note est-num">Atualizado ' + timeStr(state.lastUpdated) + "</span>";
+    if (state.saving) bottomRow += '<span class="est-readonly-note est-num">Salvando…</span>';
+    bottomRow += '<button class="est-btn" data-action="refresh">' + ICON.refresh + " Atualizar</button>";
+    if (!forceView && !state.previewView) {
+      bottomRow += '<button class="est-btn" data-action="preview-on">' + ICON.eye + " Ver como painel</button>";
+      bottomRow += '<button class="est-btn est-btn-primary" data-action="copy-link">' + ICON.copy + " " + (state.copied ? "Link copiado!" : "Copiar link do painel") + "</button>";
+    }
+    if (state.previewView && !forceView) {
+      bottomRow += '<button class="est-btn" data-action="preview-off">' + ICON.back + " Voltar à gestão</button>";
+    }
+    bottomRow += "</div>";
+
+    var headerRight = '<div class="est-header-right-col">' + topRow + bottomRow + "</div>";
+
+    var header = '<div class="est-header"><div class="est-brand"><div class="est-logo-mark">' + LOGO_SVG + '</div><div>' +
+      '<div class="est-title">Controle de Estoque</div>' +
+      (showDashboardOnly ? '<div class="est-sub">Painel · somente leitura</div>' : "") +
+      "</div></div>" + headerRight + "</div>";
+
+    var errorBanner = (!showDashboardOnly && state.globalError) ?
+      ('<div class="est-login-msg est-login-error">' + esc(state.globalError) + "</div>") : "";
+    var warningBanner = (!showDashboardOnly && state.storageWarning) ?
+      ('<div class="est-warning-banner">' + esc(state.storageWarning) + "</div>") : "";
+
+    var sidebar = "";
+    if (!showDashboardOnly) {
+      var estoqueItems = '<div class="est-sidebar-item' + (state.activeTab === "dashboard" ? " active" : "") + '" data-action="goto-cat" data-cat="dashboard">' + ICON.grid + " Dashboard</div>" +
+        state.categories.map(function (c) {
+          return '<div class="est-sidebar-item' + (state.activeTab === c.key ? " active" : "") + '" data-action="goto-cat" data-cat="' + c.key + '"><span class="est-dot" style="background:' + c.color + '"></span> ' + esc(c.label) + "</div>";
+        }).join("");
+
+      var relatoriosItems =
+        '<div class="est-sidebar-item' + (state.activeTab === "relatorios" ? " active" : "") + '" data-action="goto-cat" data-cat="relatorios">' + ICON.report + " Relatórios</div>" +
+        '<div class="est-sidebar-item' + (state.activeTab === "calendario" ? " active" : "") + '" data-action="goto-cat" data-cat="calendario">' + ICON.calendar + " Calendário</div>" +
+        '<div class="est-sidebar-item' + (state.activeTab === "log" ? " active" : "") + '" data-action="goto-cat" data-cat="log">' + ICON.download + " Log &amp; armazenamento</div>";
+
+      var adminItem = '<div class="est-sidebar-item' + (state.activeTab === "admin" ? " active" : "") + '" data-action="goto-cat" data-cat="admin">' + ICON.user + " " + (isAdmin() ? "Admin" : "Minha conta") + "</div>";
+
+      sidebar = '<div class="est-sidebar">' +
+        '<div class="est-sidebar-section"><div class="est-sidebar-title">Estoque</div>' + estoqueItems + "</div>" +
+        '<div class="est-sidebar-section"><div class="est-sidebar-title">Relatórios Gerais</div>' + relatoriosItems + "</div>" +
+        '<div class="est-sidebar-section">' + adminItem + "</div>" +
+        "</div>";
+    }
+
+    var main;
+    if (state.loading) {
+      main = '<div class="est-empty">Carregando estoque…</div>';
+    } else if (showDashboardOnly) {
+      main = renderDashboard(state.items, false);
+    } else if (state.activeTab === "dashboard") {
+      main = renderDashboard(state.items, true);
+    } else if (state.activeTab === "admin") {
+      main = renderAdminPage();
+    } else if (state.activeTab === "relatorios") {
+      main = renderReportsPage();
+    } else if (state.activeTab === "calendario") {
+      main = renderCalendarPage();
+    } else if (state.activeTab === "log") {
+      main = renderLogPage();
+    } else {
+      main = renderCategoryPage(state.activeTab);
+    }
+
+    var contentInner = errorBanner + warningBanner + '<div class="est-main">' + main + "</div>";
+
+    if (showDashboardOnly) {
+      root.innerHTML = '<div class="est-wrap">' + header + contentInner + "</div>";
+    } else {
+      root.innerHTML = '<div class="est-wrap">' + header + '<div class="est-shell">' + sidebar + '<div class="est-content">' + contentInner + "</div></div></div>";
+    }
+
+    if ((showDashboardOnly || state.activeTab === "dashboard") && !state.loading) {
+      var listEl = document.getElementById("items-list");
+      if (listEl) listEl.innerHTML = renderItemsListHTML(state.items);
+    }
+  }
+
+  // ---------- actions ----------
+
+  var App = {
+    filterDashboard: function () {
+      var listEl = document.getElementById("items-list");
+      if (listEl) listEl.innerHTML = renderItemsListHTML(state.items);
+    },
+    updateReport: function () {
+      var el = document.getElementById("report-content");
+      if (el) el.innerHTML = reportContentHTML();
+    },
+    updateLog: function () {
+      var el = document.getElementById("log-list");
+      if (el) el.innerHTML = logContentHTML();
+    }
+  };
+  window.App = App;
+
+  document.addEventListener("click", async function (e) {
+    var el = e.target.closest("[data-action]");
+    if (!el) return;
+    var action = el.getAttribute("data-action");
+    var id = el.getAttribute("data-id");
+    var cat = el.getAttribute("data-cat");
+
+    if (action === "login-submit") {
+      doLogin();
+    } else if (action === "logout") {
+      doLogout();
+    } else if (action === "save-password") {
+      doChangePassword();
+    } else if (action === "show-add-user") {
+      if (!isAdmin()) return;
+      state.addingUser = true; state.editingUserId = null; state.userFormError = ""; render();
+    } else if (action === "cancel-user-form") {
+      state.addingUser = false; state.editingUserId = null; state.userFormError = ""; render();
+    } else if (action === "edit-user") {
+      if (!isAdmin()) return;
+      state.editingUserId = id; state.addingUser = false; state.userFormError = ""; render();
+    } else if (action === "save-user") {
+      if (!isAdmin()) return;
+      var roleVal = (document.getElementById("uf-role") || {}).value || "editor";
+      var passVal = (document.getElementById("uf-password") || {}).value || "";
+      state.userFormError = "";
+      if (id) {
+        var target = findUserById(id);
+        if (!target) { state.addingUser = false; state.editingUserId = null; render(); return; }
+        if (target.role === "admin" && roleVal !== "admin") {
+          var adminCount1 = state.users.filter(function (u) { return u.role === "admin"; }).length;
+          if (adminCount1 <= 1) { state.userFormError = "Não é possível remover o último administrador."; render(); return; }
+        }
+        var userUpdates = { role: roleVal };
+        if (passVal) userUpdates.password_hash = hashPass(passVal);
+        state.saving = true; render();
+        var uRes = await supabaseClient.from("users").update(userUpdates).eq("id", id);
+        state.saving = false;
+        if (uRes.error) { state.userFormError = "Não foi possível salvar: " + uRes.error.message; render(); return; }
+        target.role = roleVal;
+        if (passVal) target.passwordHash = hashPass(passVal);
+        if (state.currentUser && state.currentUser.id === target.id) state.currentUser = target;
+        state.editingUserId = null;
+        render();
+      } else {
+        var unameVal = ((document.getElementById("uf-username") || {}).value || "").trim();
+        if (!unameVal) { state.userFormError = "Informe um nome de usuário."; render(); return; }
+        if (findUserByUsername(unameVal)) { state.userFormError = "Já existe um usuário com esse nome."; render(); return; }
+        if (!passVal) { state.userFormError = "Informe uma senha."; render(); return; }
+        var newUserRow = { id: uid(), username: unameVal, password_hash: hashPass(passVal), role: roleVal, created_at: new Date().toISOString() };
+        state.saving = true; render();
+        var insRes = await supabaseClient.from("users").insert(newUserRow);
+        state.saving = false;
+        if (insRes.error) { state.userFormError = "Não foi possível criar: " + insRes.error.message; render(); return; }
+        state.users.push(mapUserFromDb(newUserRow));
+        state.addingUser = false;
+        render();
+      }
+    } else if (action === "delete-user") {
+      if (!isAdmin()) return;
+      if (state.currentUser && state.currentUser.id === id) return;
+      var delTarget = findUserById(id);
+      if (!delTarget) return;
+      if (delTarget.role === "admin") {
+        var adminCount2 = state.users.filter(function (u) { return u.role === "admin"; }).length;
+        if (adminCount2 <= 1) { state.userFormError = "Não é possível excluir o último administrador."; render(); return; }
+      }
+      state.saving = true; render();
+      var dRes = await supabaseClient.from("users").delete().eq("id", id);
+      state.saving = false;
+      if (dRes.error) { state.userFormError = "Não foi possível excluir: " + dRes.error.message; render(); return; }
+      state.users = state.users.filter(function (u) { return u.id !== id; });
+      render();
+    } else if (action === "goto-cat") {
+      state.activeTab = cat;
+      state.adding = false;
+      state.editingId = null;
+      state.passwordError = "";
+      state.passwordSuccess = false;
+      state.addingUser = false;
+      state.editingUserId = null;
+      state.addingCategory = false;
+      state.categoryFormError = "";
+      state.importMsg = null;
+      state.movementItemId = null;
+      state.movementType = null;
+      state.movementError = "";
+      state.addingBranch = false;
+      state.branchFormError = "";
+      state.purgeConfirmPending = false;
+      state.purgeMsg = null;
+      state.downloadMsg = null;
+      if (cat === "calendario" && !state.calendarMonth) state.calendarMonth = currentMonthKey();
+      render();
+    } else if (action === "show-add-category") {
+      if (!isAdmin()) return;
+      state.addingCategory = true; state.categoryFormError = ""; render();
+    } else if (action === "cancel-category-form") {
+      state.addingCategory = false; state.categoryFormError = ""; render();
+    } else if (action === "save-category") {
+      if (!isAdmin()) return;
+      var catName = ((document.getElementById("cf-name") || {}).value || "").trim();
+      var catColor = (document.getElementById("cf-color") || {}).value || "#4F46E5";
+      if (!catName) { state.categoryFormError = "Informe um nome para a categoria."; render(); return; }
+      if (findCategoryByLabel(catName)) { state.categoryFormError = "Já existe uma categoria com esse nome."; render(); return; }
+      var newCatRow = { key: uniqueCategoryKey(slugify(catName)), label: catName, color: catColor };
+      state.saving = true; render();
+      var catRes = await insertCategory(newCatRow);
+      state.saving = false;
+      if (catRes.error) { state.categoryFormError = "Não foi possível salvar: " + catRes.error.message; render(); return; }
+      state.categories.push(newCatRow);
+      state.addingCategory = false;
+      state.categoryFormError = "";
+      render();
+    } else if (action === "show-add-branch") {
+      if (!isAdmin()) return;
+      state.addingBranch = true; state.branchFormError = ""; render();
+    } else if (action === "cancel-branch-form") {
+      state.addingBranch = false; state.branchFormError = ""; render();
+    } else if (action === "save-branch") {
+      if (!isAdmin()) return;
+      var branchName = ((document.getElementById("bf-name") || {}).value || "").trim();
+      if (!branchName) { state.branchFormError = "Informe um nome para a filial."; render(); return; }
+      if (findBranchByLabel(branchName)) { state.branchFormError = "Já existe uma filial com esse nome."; render(); return; }
+      var newBranchRow = { key: uniqueBranchKey(slugify(branchName)), label: branchName };
+      state.saving = true; render();
+      var branchRes = await insertBranch(newBranchRow);
+      state.saving = false;
+      if (branchRes.error) { state.branchFormError = "Não foi possível salvar: " + branchRes.error.message; render(); return; }
+      state.branches.push(newBranchRow);
+      state.addingBranch = false;
+      state.branchFormError = "";
+      render();
+    } else if (action === "export-excel") {
+      exportExcel();
+    } else if (action === "trigger-import") {
+      if (!canEditItems()) return;
+      var fileInput = document.getElementById("import-file");
+      if (fileInput) fileInput.click();
+    } else if (action === "refresh") {
+      state.loading = true; render();
+      await Promise.all([loadItems(), loadMovements(), loadCategories(), loadBranches(), loadUsers(), loadAuditLog(), loadDbSize()]);
+      render();
+    } else if (action === "preview-on") {
+      state.previewView = true; render();
+    } else if (action === "preview-off") {
+      state.previewView = false; render();
+    } else if (action === "copy-link") {
+      try {
+        var url = new URL(window.location.href);
+        url.searchParams.set("view", "dashboard");
+        navigator.clipboard.writeText(url.toString());
+        state.copied = true;
+        render();
+        setTimeout(function () { state.copied = false; render(); }, 2000);
+      } catch (err) {}
+    } else if (action === "show-add") {
+      if (!canEditItems()) return;
+      state.adding = true; state.editingId = null; render();
+      var nameEl = document.getElementById("if-name"); if (nameEl) nameEl.focus();
+    } else if (action === "cancel-form") {
+      state.adding = false; state.editingId = null; render();
+    } else if (action === "save-item") {
+      if (!canEditItems()) return;
+      var name = (document.getElementById("if-name") || {}).value || "";
+      if (!name.trim()) return;
+      var unitVal = ((document.getElementById("if-unit") || {}).value || "un").trim() || "un";
+      var minVal = Number((document.getElementById("if-min") || {}).value) || 0;
+      var idealVal = Number((document.getElementById("if-ideal") || {}).value) || 0;
+      state.itemFormError = "";
+      if (id) {
+        state.saving = true; render();
+        var updRes = await supabaseClient.from("items").update({ name: name.trim(), unit: unitVal, min: minVal, ideal: idealVal }).eq("id", id);
+        state.saving = false;
+        if (updRes.error) { state.itemFormError = "Não foi possível salvar: " + updRes.error.message; render(); return; }
+        var existingItem = findItemById(id);
+        if (existingItem) { existingItem.name = name.trim(); existingItem.unit = unitVal; existingItem.min = minVal; existingItem.ideal = idealVal; }
+      } else {
+        var initQty = Math.max(0, Number((document.getElementById("if-qty") || {}).value) || 0);
+        var initValue = Math.max(0, Number((document.getElementById("if-value") || {}).value) || 0);
+        var newItemId = uid();
+        state.saving = true; render();
+        var createRes = await supabaseClient.rpc("criar_item_inicial", {
+          p_id: newItemId, p_category: cat, p_name: name.trim(), p_unit: unitVal, p_qty: initQty,
+          p_min: minVal, p_ideal: idealVal, p_valor_unit: initValue, p_registrado_por: state.currentUser.username
+        });
+        state.saving = false;
+        if (createRes.error) { state.itemFormError = "Não foi possível criar o item: " + createRes.error.message; render(); return; }
+        await refetchItem(newItemId);
+        if (initQty > 0) await refetchMovement(newItemId + "-init");
+      }
+      state.adding = false; state.editingId = null; state.itemFormError = "";
+      render();
+    } else if (action === "edit-item") {
+      if (!canEditItems()) return;
+      state.editingId = id; state.adding = false; state.itemFormError = ""; render();
+    } else if (action === "delete-item") {
+      if (!canDeleteItems()) return;
+      state.saving = true; render();
+      var delRes = await supabaseClient.rpc("excluir_item", { p_item_id: id, p_excluido_por: state.currentUser.username });
+      state.saving = false;
+      if (delRes.error) { state.globalError = "Não foi possível excluir o item: " + delRes.error.message; render(); return; }
+      state.items = state.items.filter(function (it) { return it.id !== id; });
+      loadAuditLog();
+      render();
+    } else if (action === "show-entrada" || action === "show-saida") {
+      if (!canEditItems()) return;
+      state.movementItemId = id;
+      state.movementType = action === "show-entrada" ? "entrada" : "saida";
+      state.movementError = "";
+      state.editingId = null;
+      render();
+    } else if (action === "cancel-movement") {
+      state.movementItemId = null; state.movementType = null; state.movementError = ""; render();
+    } else if (action === "save-movement") {
+      if (!canEditItems()) return;
+      var mvItem = findItemById(id);
+      if (!mvItem) { state.movementItemId = null; render(); return; }
+      var qtyVal = Number((document.getElementById("mv-qty") || {}).value);
+      var dtVal = (document.getElementById("mv-datetime") || {}).value || "";
+      state.movementError = "";
+      if (!qtyVal || qtyVal <= 0) { state.movementError = "Informe uma quantidade válida."; render(); return; }
+      var occurredAt = dtVal ? new Date(dtVal) : new Date();
+      if (isNaN(occurredAt.getTime())) occurredAt = new Date();
+      var newMovementId = uid();
+
+      if (state.movementType === "entrada") {
+        var unitValue = Number((document.getElementById("mv-value") || {}).value);
+        if (unitValue == null || isNaN(unitValue) || unitValue < 0) unitValue = 0;
+        state.saving = true; render();
+        var entradaRes = await supabaseClient.rpc("registrar_entrada", {
+          p_id: newMovementId, p_item_id: mvItem.id, p_qtd: qtyVal, p_valor_unit: unitValue,
+          p_ocorrido_em: occurredAt.toISOString(), p_registrado_por: state.currentUser.username
+        });
+        state.saving = false;
+        if (entradaRes.error) { state.movementError = entradaRes.error.message || "Não foi possível registrar a entrada."; render(); return; }
+      } else {
+        var withdrawalName = ((document.getElementById("mv-name") || {}).value || "").trim();
+        var branchKey = (document.getElementById("mv-branch") || {}).value || "";
+        if (!withdrawalName) { state.movementError = "Informe o nome/motivo da retirada."; render(); return; }
+        if (!findBranchByKey(branchKey)) { state.movementError = "Selecione a filial."; render(); return; }
+        state.saving = true; render();
+        var saidaRes = await supabaseClient.rpc("registrar_saida", {
+          p_id: newMovementId, p_item_id: mvItem.id, p_qtd: qtyVal, p_nome_retirada: withdrawalName, p_filial: branchKey,
+          p_ocorrido_em: occurredAt.toISOString(), p_registrado_por: state.currentUser.username
+        });
+        state.saving = false;
+        if (saidaRes.error) { state.movementError = saidaRes.error.message || "Não foi possível registrar a saída."; render(); return; }
+      }
+
+      await Promise.all([refetchItem(mvItem.id), refetchMovement(newMovementId)]);
+      loadAuditLog();
+      loadDbSize();
+      state.movementItemId = null;
+      state.movementType = null;
+      render();
+    } else if (action === "delete-movement") {
+      if (!isAdmin()) return;
+      state.saving = true; render();
+      var delMovRes = await supabaseClient.rpc("excluir_movimento", { p_movement_id: id, p_excluido_por: state.currentUser.username });
+      state.saving = false;
+      if (delMovRes.error) { state.globalError = "Não foi possível excluir a movimentação: " + delMovRes.error.message; render(); return; }
+      state.movements = state.movements.filter(function (m) { return m.id !== id; });
+      await loadAuditLog();
+      render();
+      var reportEl = document.getElementById("report-content");
+      if (reportEl) reportEl.innerHTML = reportContentHTML();
+    } else if (action === "download-period") {
+      if (!isAdmin()) return;
+      await downloadPeriodExcel();
+    } else if (action === "show-purge-confirm") {
+      if (!isAdmin()) return;
+      state.purgeConfirmPending = true; state.purgeMsg = null; render();
+    } else if (action === "cancel-purge") {
+      state.purgeConfirmPending = false; render();
+    } else if (action === "confirm-purge") {
+      if (!isAdmin()) return;
+      var untilVal = (document.getElementById("purge-until") || {}).value || "";
+      if (!untilVal) { state.purgeMsg = { type: "error", text: "Selecione uma data." }; render(); return; }
+      var untilIso = new Date(untilVal + "T00:00:00").toISOString();
+      state.purging = true; render();
+      var purgeRes = await supabaseClient.rpc("purgar_periodo", { p_ate: untilIso, p_executado_por: state.currentUser.username });
+      state.purging = false;
+      if (purgeRes.error) { state.purgeMsg = { type: "error", text: "Não foi possível apagar: " + purgeRes.error.message }; render(); return; }
+      state.purgeConfirmPending = false;
+      state.purgeMsg = { type: "success", text: "Removidos " + purgeRes.data + " registro(s) anteriores a " + untilVal.split("-").reverse().join("/") + "." };
+      await Promise.all([loadMovements(), loadAuditLog(), loadDbSize()]);
+      render();
+    } else if (action === "cal-prev" || action === "cal-next") {
+      var parts = (state.calendarMonth || currentMonthKey()).split("-");
+      var y = Number(parts[0]), m = Number(parts[1]) - 1;
+      var d = new Date(y, m + (action === "cal-next" ? 1 : -1), 1);
+      state.calendarMonth = d.getFullYear() + "-" + pad2(d.getMonth() + 1);
+      state.calendarSelectedDate = "";
+      render();
+    } else if (action === "cal-select-day") {
+      state.calendarSelectedDate = state.calendarSelectedDate === id ? "" : id;
+      render();
+    }
+  });
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Enter") return;
+    var id = e.target && e.target.id;
+    if (id === "login-user" || id === "login-pass") {
+      e.preventDefault();
+      doLogin();
+    } else if (id === "chpwd-current" || id === "chpwd-new" || id === "chpwd-confirm") {
+      e.preventDefault();
+      doChangePassword();
+    }
+  });
+
+  document.addEventListener("change", function (e) {
+    if (e.target && e.target.id === "import-file") {
+      var f = e.target.files && e.target.files[0];
+      if (f) handleImportFile(f);
+      e.target.value = "";
+    }
+  });
+
+  async function initApp() {
+    if (!supabaseConfigured) { state.loading = false; render(); return; }
+    await Promise.all([loadItems(), loadUsers(), loadCategories(), loadBranches(), loadMovements()]);
+    loadSession();
+    state.calendarMonth = currentMonthKey();
+    render();
+
+    if (!forceView) {
+      await Promise.all([loadAuditLog(), loadDbSize()]);
+      render();
+    }
+
+    if (forceView) {
+      setInterval(async function () { await loadItems(); render(); }, 20000);
+    }
+  }
+
+  initApp();
+})();
+</script>
+</body>
+</html>
