@@ -196,7 +196,11 @@
     purgeConfirmPending: false,
     purgeMsg: null,
     downloadMsg: null,
-    purging: false
+    purging: false,
+    invoices: [],
+    nfReview: null,
+    nfError: "",
+    nfSaving: false
   };
 
   var DB_LIMIT_BYTES = 500 * 1024 * 1024; // limite do plano gratuito do Supabase (500 MB)
@@ -322,6 +326,24 @@
       ("Atenção: o banco de dados já usa " + (pct * 100).toFixed(0) + "% do limite gratuito do Supabase (500 MB). Considere baixar e apagar movimentações antigas em Relatórios Gerais → Log.") : "";
   }
 
+  // ---------- notas fiscais importadas ----------
+
+  async function loadInvoices() {
+    var res = await supabaseClient.from("invoices").select("*").order("imported_at", { ascending: false }).limit(200);
+    if (res.error) { state.invoices = []; return; }
+    state.invoices = (res.data || []).map(mapInvoiceFromDb);
+  }
+
+  function mapInvoiceFromDb(row) {
+    return {
+      id: row.id, supplierCnpj: row.supplier_cnpj, supplierName: row.supplier_name,
+      number: row.number, series: row.series, accessKey: row.access_key,
+      issueDate: row.issue_date, totalValue: Number(row.total_value) || 0,
+      itemCount: Number(row.item_count) || 0, xmlContent: row.xml_content,
+      importedBy: row.imported_by, importedAt: row.imported_at
+    };
+  }
+
   // ---------- datas ----------
 
   function pad2(n) { return (n < 10 ? "0" : "") + n; }
@@ -367,6 +389,10 @@
 
   function uid() {
     return "it_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  }
+
+  function uidNf() {
+    return "nf_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   }
 
   async function loadItems() {
@@ -700,11 +726,227 @@
     return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
   }
 
+  // ---------- importação de nota fiscal (XML da NF-e) ----------
+
+  function xmlTag(parent, tag) {
+    if (!parent) return "";
+    var el = parent.getElementsByTagName(tag)[0];
+    return el ? (el.textContent || "").trim() : "";
+  }
+
+  function parseNFeXml(text) {
+    var xml = new DOMParser().parseFromString(text, "application/xml");
+    if (xml.getElementsByTagName("parsererror").length) {
+      throw new Error("arquivo XML inválido");
+    }
+    var infNFe = xml.getElementsByTagName("infNFe")[0];
+    if (!infNFe) throw new Error("isso não parece ser o XML de uma NF-e");
+
+    var emit = xml.getElementsByTagName("emit")[0];
+    var ide = xml.getElementsByTagName("ide")[0];
+    var total = xml.getElementsByTagName("ICMSTot")[0];
+    var infProt = xml.getElementsByTagName("infProt")[0];
+
+    var accessKey = xmlTag(infProt, "chNFe");
+    if (!accessKey) {
+      var idAttr = infNFe.getAttribute("Id") || "";
+      accessKey = idAttr.replace(/^NFe/, "");
+    }
+
+    var dhEmi = xmlTag(ide, "dhEmi");
+    var invoice = {
+      supplierCnpj: xmlTag(emit, "CNPJ"),
+      supplierName: xmlTag(emit, "xNome"),
+      number: xmlTag(ide, "nNF"),
+      series: xmlTag(ide, "serie"),
+      accessKey: accessKey,
+      issueDate: dhEmi ? new Date(dhEmi) : null,
+      totalValue: Number(xmlTag(total, "vNF")) || 0
+    };
+
+    var dets = xml.getElementsByTagName("det");
+    var items = [];
+    for (var i = 0; i < dets.length; i++) {
+      var prod = dets[i].getElementsByTagName("prod")[0];
+      if (!prod) continue;
+      var ean = xmlTag(prod, "cEAN");
+      if (!ean || ean.toUpperCase() === "SEM GTIN") ean = "";
+      items.push({
+        ean: ean,
+        supplierCode: xmlTag(prod, "cProd"),
+        xmlName: xmlTag(prod, "xProd"),
+        unit: xmlTag(prod, "uCom") || "un",
+        qty: Number(xmlTag(prod, "qCom")) || 0,
+        unitValue: Number(xmlTag(prod, "vUnCom")) || 0
+      });
+    }
+    if (!items.length) throw new Error("nenhum item encontrado nessa nota");
+
+    return { invoice: invoice, items: items };
+  }
+
+  async function prepareNfReview(parsed, xmlContent) {
+    var invoice = parsed.invoice;
+    invoice.xmlContent = xmlContent;
+
+    var eans = [];
+    parsed.items.forEach(function (it) { if (it.ean) eans.push(it.ean); });
+
+    var linkMap = {};
+    if (eans.length && invoice.supplierCnpj) {
+      var linkRes = await supabaseClient.from("item_supplier_links").select("ean,item_id")
+        .eq("supplier_cnpj", invoice.supplierCnpj).in("ean", eans);
+      if (!linkRes.error && linkRes.data) {
+        linkRes.data.forEach(function (row) { linkMap[row.ean] = row.item_id; });
+      }
+    }
+
+    var reviewItems = parsed.items.map(function (it) {
+      var matchedId = it.ean && linkMap[it.ean] ? linkMap[it.ean] : "";
+      var autoMatched = !!matchedId;
+      if (!matchedId) {
+        var byName = state.items.filter(function (si) {
+          return si.name.trim().toLowerCase() === it.xmlName.trim().toLowerCase();
+        })[0];
+        if (byName) matchedId = byName.id;
+      }
+      return {
+        ean: it.ean,
+        supplierCode: it.supplierCode,
+        xmlName: it.xmlName,
+        name: it.xmlName,
+        unit: it.unit,
+        qty: it.qty,
+        unitValue: it.unitValue,
+        min: 0,
+        ideal: 0,
+        category: state.categories[0] ? state.categories[0].key : "",
+        itemChoice: matchedId || "__new__",
+        autoMatched: autoMatched
+      };
+    });
+
+    state.nfError = "";
+    state.nfReview = { invoice: invoice, items: reviewItems };
+    render();
+  }
+
+  function handleNfXmlFile(file) {
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      var text = String(e.target.result || "");
+      try {
+        var parsed = parseNFeXml(text);
+        prepareNfReview(parsed, text);
+      } catch (err) {
+        state.nfError = "Não foi possível ler essa nota fiscal: " + err.message;
+        render();
+      }
+    };
+    reader.onerror = function () {
+      state.nfError = "Não foi possível ler o arquivo.";
+      render();
+    };
+    reader.readAsText(file);
+  }
+
+  function syncAllNfReviewRows() {
+    if (!state.nfReview) return;
+    state.nfReview.items.forEach(function (row, idx) {
+      var qtyEl = document.getElementById("nf-qty-" + idx);
+      var valEl = document.getElementById("nf-value-" + idx);
+      var choiceEl = document.getElementById("nf-choice-" + idx);
+      var nameEl = document.getElementById("nf-name-" + idx);
+      var unitEl = document.getElementById("nf-unit-" + idx);
+      var catEl = document.getElementById("nf-cat-" + idx);
+      var minEl = document.getElementById("nf-min-" + idx);
+      var idealEl = document.getElementById("nf-ideal-" + idx);
+      if (qtyEl) row.qty = Number(qtyEl.value) || 0;
+      if (valEl) row.unitValue = Number(valEl.value) || 0;
+      if (choiceEl) row.itemChoice = choiceEl.value;
+      if (nameEl) row.name = nameEl.value;
+      if (unitEl) row.unit = unitEl.value;
+      if (catEl) row.category = catEl.value;
+      if (minEl) row.min = Number(minEl.value) || 0;
+      if (idealEl) row.ideal = Number(idealEl.value) || 0;
+    });
+  }
+
+  function downloadInvoiceXml(invoiceRow) {
+    try {
+      var blob = new Blob([invoiceRow.xmlContent || ""], { type: "application/xml" });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = "NFe-" + (invoiceRow.number || invoiceRow.id) + ".xml";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    } catch (e) {}
+  }
+
   // ---------- rendering ----------
 
   function statusBadge(status) {
     var m = STATUS_META[status];
     return '<span class="est-badge" style="color:' + m.color + ';background:' + m.bg + '">' + m.label + "</span>";
+  }
+
+  function nfReviewRowHTML(row, idx) {
+    var isNew = row.itemChoice === "__new__" || !row.itemChoice;
+    var existingOptions = state.items.slice().sort(function (a, b) { return a.name.localeCompare(b.name); }).map(function (it) {
+      return '<option value="' + it.id + '"' + (row.itemChoice === it.id ? " selected" : "") + '>' + esc(it.name) + " (" + esc(catMeta(it.category).label) + ")</option>";
+    }).join("");
+
+    var newBlock = isNew ? (
+      '<div class="est-form-grid" style="margin-top:10px">' +
+      '<div class="est-field" style="flex-basis:100%"><label class="est-label">Nome do novo item</label><input class="est-input" id="nf-name-' + idx + '" value="' + esc(row.name) + '"/></div>' +
+      '<div class="est-field"><label class="est-label">Categoria</label><select class="est-select" id="nf-cat-' + idx + '">' +
+      state.categories.map(function (c) { return '<option value="' + c.key + '"' + (row.category === c.key ? " selected" : "") + '>' + esc(c.label) + "</option>"; }).join("") +
+      "</select></div>" +
+      '<div class="est-field"><label class="est-label">Unidade</label><input class="est-input" id="nf-unit-' + idx + '" value="' + esc(row.unit) + '"/></div>' +
+      '<div class="est-field"><label class="est-label">Nível baixo até</label><input class="est-input" type="number" id="nf-min-' + idx + '" value="' + esc(row.min || 0) + '"/></div>' +
+      '<div class="est-field"><label class="est-label">Nível OK a partir de</label><input class="est-input" type="number" id="nf-ideal-' + idx + '" value="' + esc(row.ideal || 0) + '"/></div>' +
+      "</div>"
+    ) : "";
+
+    var matchBadge = row.autoMatched ? ' <span style="color:#16A34A">· reconhecido automaticamente</span>' : "";
+
+    return '<div class="est-form" style="margin-bottom:10px">' +
+      '<div class="est-row-name">' + esc(row.xmlName) + "</div>" +
+      '<div class="est-row-meta" style="margin-bottom:10px">' + (row.ean ? "EAN " + esc(row.ean) + " · " : "") +
+      "Na nota: " + row.qty + " " + esc(row.unit) + " · " + brl(row.unitValue) + "/un" + matchBadge + "</div>" +
+      '<div class="est-form-grid">' +
+      '<div class="est-field" style="flex-basis:100%"><label class="est-label">Item no estoque</label>' +
+      '<select class="est-select" id="nf-choice-' + idx + '" onchange="App.changeNfReviewItem(' + idx + ')">' +
+      '<option value="__new__"' + (isNew ? " selected" : "") + '>+ Criar item novo</option>' +
+      existingOptions +
+      "</select></div>" +
+      '<div class="est-field"><label class="est-label">Quantidade</label><input class="est-input" type="number" min="0" step="0.01" id="nf-qty-' + idx + '" value="' + esc(row.qty) + '"/></div>' +
+      '<div class="est-field"><label class="est-label">Valor unitário (R$)</label><input class="est-input" type="number" min="0" step="0.01" id="nf-value-' + idx + '" value="' + esc(row.unitValue) + '"/></div>' +
+      "</div>" + newBlock +
+      "</div>";
+  }
+
+  function renderNfReviewPage() {
+    var inv = state.nfReview.invoice;
+    var header = '<div style="margin-bottom:16px">' +
+      '<h2 class="est-h2" style="margin:0 0 4px">Conferir nota fiscal</h2>' +
+      '<div class="est-row-meta">' + esc(inv.supplierName || "Fornecedor não identificado") +
+      (inv.number ? " · Nota nº " + esc(inv.number) : "") +
+      (inv.issueDate ? " · " + fmtDateTime(inv.issueDate) : "") +
+      " · Total da nota " + brl(inv.totalValue) + "</div>" +
+      '<div class="est-row-meta" style="margin-top:4px">Confira os itens abaixo antes de lançar no estoque. Nada é salvo até você confirmar.</div>' +
+      "</div>";
+    var errBlock = state.nfError ? ('<div class="est-login-msg est-login-error" style="margin-bottom:14px">' + esc(state.nfError) + "</div>") : "";
+    var rows = state.nfReview.items.map(nfReviewRowHTML).join("");
+    var actions = '<div style="display:flex;gap:8px;margin-top:4px">' +
+      '<button class="est-btn est-btn-primary" data-action="confirm-nf-import"' + (state.nfSaving ? " disabled" : "") + '>' + ICON.check +
+      (state.nfSaving ? " Importando…" : " Confirmar e lançar no estoque") + "</button>" +
+      '<button class="est-btn" data-action="cancel-nf-import"' + (state.nfSaving ? " disabled" : "") + '>' + ICON.x + " Cancelar</button>" +
+      "</div>";
+    return header + errBlock + rows + actions;
   }
 
   function categoryFormHTML() {
@@ -767,7 +1009,9 @@
       ('<div class="est-toolbar">' +
       '<button class="est-btn" data-action="export-excel">' + ICON.download + " Exportar Excel</button>" +
       (canEditItems() ? '<button class="est-btn" data-action="trigger-import">' + ICON.upload + " Importar Excel</button>" : "") +
+      (canEditItems() ? '<button class="est-btn" data-action="trigger-import-nf">' + ICON.upload + " Importar nota fiscal (XML)</button>" : "") +
       '<input type="file" id="import-file" accept=".xlsx,.xls" style="display:none"/>' +
+      '<input type="file" id="import-nf-file" accept=".xml" style="display:none"/>' +
       "</div>") : "";
 
     var toolbar =
@@ -1064,13 +1308,32 @@
     }).join("");
     var filialTable = '<h2 class="est-h2">Gasto por filial</h2>' + (state.branches.length ? filialRows : '<div class="est-empty">Nenhuma filial cadastrada.</div>');
 
+    var filteredInvoices = state.invoices.filter(function (inv) {
+      var d = localDateKey(new Date(inv.issueDate || inv.importedAt));
+      if (filters.from && d < filters.from) return false;
+      if (filters.to && d > filters.to) return false;
+      return true;
+    });
+    var invoicesBlock = '<h2 class="est-h2">Notas fiscais importadas</h2>' +
+      (filteredInvoices.length ? filteredInvoices.map(invoiceRowHTML).join("") : '<div class="est-empty">Nenhuma nota fiscal importada no período selecionado.</div>');
+
     var history = filtered.slice().sort(function (a, b) { return new Date(b.occurredAt) - new Date(a.occurredAt); });
     var shown = history.slice(0, 100);
     var historyBlock = '<h2 class="est-h2">Histórico de movimentações</h2>' +
       (shown.length ? shown.map(movementRowHTML).join("") : '<div class="est-empty">Nenhuma movimentação encontrada para o período/filtro selecionado.</div>') +
       (history.length > 100 ? '<div class="est-readonly-note" style="margin-top:8px">Mostrando as 100 mais recentes de ' + history.length + ".</div>" : "");
 
-    return tiles + filialTable + historyBlock;
+    return tiles + filialTable + invoicesBlock + historyBlock;
+  }
+
+  function invoiceRowHTML(inv) {
+    return '<div class="est-row">' + ICON.arrowIn +
+      '<div style="flex:1"><div class="est-row-name">' + esc(inv.supplierName || "Fornecedor não identificado") +
+      (inv.number ? " <span style=\"font-weight:400;color:#8A8F98\">· nota nº " + esc(inv.number) + "</span>" : "") + "</div>" +
+      '<div class="est-row-meta">' + (inv.issueDate ? fmtDateTime(inv.issueDate) : "-") + " · " + inv.itemCount + " ite" + (inv.itemCount === 1 ? "m" : "ns") + " · importada por " + esc(inv.importedBy || "-") + "</div></div>" +
+      '<div class="est-num" style="text-align:right;min-width:90px">' + brl(inv.totalValue) + "</div>" +
+      '<button class="est-btn est-btn-ghost" data-action="download-invoice" data-id="' + inv.id + '" title="Baixar XML">' + ICON.download + "</button>" +
+      "</div>";
   }
 
   function renderReportsPage() {
@@ -1376,6 +1639,8 @@
     var main;
     if (state.loading) {
       main = '<div class="est-empty">Carregando estoque…</div>';
+    } else if (state.nfReview && !showDashboardOnly) {
+      main = renderNfReviewPage();
     } else if (showDashboardOnly) {
       main = renderDashboard(state.items, false);
     } else if (state.activeTab === "dashboard") {
@@ -1420,6 +1685,13 @@
     updateLog: function () {
       var el = document.getElementById("log-list");
       if (el) el.innerHTML = logContentHTML();
+    },
+    changeNfReviewItem: function (idx) {
+      if (!state.nfReview) return;
+      syncAllNfReviewRows();
+      var choiceEl = document.getElementById("nf-choice-" + idx);
+      if (choiceEl) state.nfReview.items[idx].itemChoice = choiceEl.value;
+      render();
     }
   };
   window.App = App;
@@ -1563,6 +1835,77 @@
       if (!canEditItems()) return;
       var fileInput = document.getElementById("import-file");
       if (fileInput) fileInput.click();
+    } else if (action === "trigger-import-nf") {
+      if (!canEditItems()) return;
+      var nfFileInput = document.getElementById("import-nf-file");
+      if (nfFileInput) nfFileInput.click();
+    } else if (action === "cancel-nf-import") {
+      state.nfReview = null; state.nfError = ""; render();
+    } else if (action === "confirm-nf-import") {
+      if (!canEditItems() || !state.nfReview) return;
+      syncAllNfReviewRows();
+      var nfRows = state.nfReview.items;
+      var nfInvalid = nfRows.some(function (r) {
+        if (!(Number(r.qty) > 0)) return true;
+        if (r.itemChoice === "__new__" || !r.itemChoice) {
+          if (!r.name || !r.name.trim()) return true;
+          if (!r.category) return true;
+        }
+        return false;
+      });
+      if (nfInvalid) {
+        state.nfError = "Confira os itens: a quantidade precisa ser maior que zero, e itens novos precisam de nome e categoria.";
+        render();
+        return;
+      }
+      state.nfError = "";
+      state.nfSaving = true; render();
+
+      var nfInvoiceId = uidNf();
+      var nfPayloadItems = nfRows.map(function (r) {
+        var isNew = r.itemChoice === "__new__" || !r.itemChoice;
+        return {
+          item_id: isNew ? uid() : r.itemChoice,
+          is_new: isNew,
+          category: isNew ? r.category : null,
+          name: isNew ? r.name.trim() : null,
+          unit: isNew ? (r.unit || "un").trim() : null,
+          min: isNew ? Number(r.min) || 0 : null,
+          ideal: isNew ? Number(r.ideal) || 0 : null,
+          qty: Number(r.qty) || 0,
+          unit_value: Number(r.unitValue) || 0,
+          ean: r.ean || null
+        };
+      });
+
+      var nfInv = state.nfReview.invoice;
+      var nfRes = await supabaseClient.rpc("importar_nota_fiscal", {
+        p_invoice_id: nfInvoiceId,
+        p_supplier_cnpj: nfInv.supplierCnpj || null,
+        p_supplier_name: nfInv.supplierName || null,
+        p_number: nfInv.number || null,
+        p_series: nfInv.series || null,
+        p_access_key: nfInv.accessKey || null,
+        p_issue_date: nfInv.issueDate ? new Date(nfInv.issueDate).toISOString() : null,
+        p_total_value: nfInv.totalValue || 0,
+        p_xml_content: nfInv.xmlContent || "",
+        p_items: nfPayloadItems,
+        p_registrado_por: state.currentUser.username
+      });
+
+      state.nfSaving = false;
+      if (nfRes.error) {
+        state.nfError = "Não foi possível importar a nota: " + nfRes.error.message;
+        render();
+        return;
+      }
+      state.nfReview = null;
+      state.importMsg = { type: "success", text: "Nota fiscal importada: " + nfRows.length + " ite" + (nfRows.length === 1 ? "m lançado" : "ns lançados") + " no estoque." };
+      await refreshAllData();
+      render();
+    } else if (action === "download-invoice") {
+      var invRow = state.invoices.filter(function (x) { return x.id === id; })[0];
+      if (invRow) downloadInvoiceXml(invRow);
     } else if (action === "refresh") {
       state.loading = true; render();
       await refreshAllData();
@@ -1743,11 +2086,15 @@
       var f = e.target.files && e.target.files[0];
       if (f) handleImportFile(f);
       e.target.value = "";
+    } else if (e.target && e.target.id === "import-nf-file") {
+      var nfFile = e.target.files && e.target.files[0];
+      if (nfFile) handleNfXmlFile(nfFile);
+      e.target.value = "";
     }
   });
 
   async function refreshAllData() {
-    await Promise.all([loadItems(), loadMovements(), loadCategories(), loadBranches(), loadUsers(), loadAuditLog(), loadDbSize()]);
+    await Promise.all([loadItems(), loadMovements(), loadCategories(), loadBranches(), loadUsers(), loadAuditLog(), loadDbSize(), loadInvoices()]);
   }
 
   // Evita que uma atualização automática em segundo plano apague o que
@@ -1756,8 +2103,8 @@
   function shouldSkipAutoRefresh() {
     var ae = document.activeElement;
     if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.tagName === "SELECT")) return true;
-    if (state.saving || state.loading) return true;
-    if (state.adding || state.editingId || state.movementItemId || state.addingCategory || state.addingBranch || state.purgeConfirmPending) return true;
+    if (state.saving || state.loading || state.nfSaving) return true;
+    if (state.adding || state.editingId || state.movementItemId || state.addingCategory || state.addingBranch || state.purgeConfirmPending || state.nfReview) return true;
     return false;
   }
 
@@ -1778,7 +2125,7 @@
   function startRealtime() {
     if (!supabaseClient) return;
     var channel = supabaseClient.channel("estoque-live-changes");
-    ["items", "movements", "categories", "branches", "users", "audit_log"].forEach(function (t) {
+    ["items", "movements", "categories", "branches", "users", "audit_log", "invoices"].forEach(function (t) {
       channel.on("postgres_changes", { event: "*", schema: "public", table: t }, scheduleRealtimeRefresh);
     });
     channel.subscribe();
@@ -1792,7 +2139,7 @@
     render();
 
     if (!forceView) {
-      await Promise.all([loadAuditLog(), loadDbSize()]);
+      await Promise.all([loadAuditLog(), loadDbSize(), loadInvoices()]);
       render();
       startRealtime();
     }

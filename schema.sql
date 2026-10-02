@@ -75,8 +75,39 @@ create table if not exists audit_log (
   occurred_at timestamptz not null default now()
 );
 
+-- Notas fiscais importadas (XML da NF-e) — guardadas como prova,
+-- ligadas às entradas de estoque que geraram.
+create table if not exists invoices (
+  id text primary key,
+  supplier_cnpj text,
+  supplier_name text,
+  number text,
+  series text,
+  access_key text,
+  issue_date timestamptz,
+  total_value numeric not null default 0,
+  item_count integer not null default 0,
+  xml_content text,
+  imported_by text,
+  imported_at timestamptz not null default now()
+);
+
+-- Lembra qual item do estoque corresponde a qual código de barras de
+-- cada fornecedor, pra reconhecer sozinho em notas futuras.
+create table if not exists item_supplier_links (
+  supplier_cnpj text not null,
+  ean text not null,
+  item_id text not null references items(id) on delete cascade,
+  updated_at timestamptz not null default now(),
+  primary key (supplier_cnpj, ean)
+);
+
+alter table movements add column if not exists invoice_id text references invoices(id) on delete set null;
+
 create index if not exists idx_movements_occurred_at on movements (occurred_at desc);
 create index if not exists idx_audit_log_occurred_at on audit_log (occurred_at desc);
+create index if not exists idx_movements_invoice_id on movements (invoice_id);
+create index if not exists idx_invoices_imported_at on invoices (imported_at desc);
 
 -- ---------- dados iniciais ----------
 -- (categorias, filiais e o usuário admin padrão já vêm prontos;
@@ -114,6 +145,8 @@ alter table users enable row level security;
 alter table items enable row level security;
 alter table movements enable row level security;
 alter table audit_log enable row level security;
+alter table invoices enable row level security;
+alter table item_supplier_links enable row level security;
 
 drop policy if exists "allow all categories" on categories;
 create policy "allow all categories" on categories for all using (true) with check (true);
@@ -132,6 +165,12 @@ create policy "allow all movements" on movements for all using (true) with check
 
 drop policy if exists "allow all audit_log" on audit_log;
 create policy "allow all audit_log" on audit_log for all using (true) with check (true);
+
+drop policy if exists "allow all invoices" on invoices;
+create policy "allow all invoices" on invoices for all using (true) with check (true);
+
+drop policy if exists "allow all item_supplier_links" on item_supplier_links;
+create policy "allow all item_supplier_links" on item_supplier_links for all using (true) with check (true);
 
 -- ---------- funções (registram entrada/saída de forma atômica) ----------
 -- Usar essas funções (em vez de fazer UPDATE + INSERT direto do
@@ -326,6 +365,104 @@ create or replace function get_db_size() returns bigint as $$
   select pg_database_size(current_database());
 $$ language sql stable security definer;
 
+-- Importa uma nota fiscal (NF-e) já conferida pelo usuário na tela de
+-- revisão: cria os itens novos que precisar, registra a entrada de
+-- cada item (com média ponderada de custo), grava tudo no log de
+-- auditoria e lembra o código de barras de cada item pra reconhecer
+-- sozinho em notas futuras do mesmo fornecedor.
+create or replace function importar_nota_fiscal(
+  p_invoice_id text, p_supplier_cnpj text, p_supplier_name text, p_number text,
+  p_series text, p_access_key text, p_issue_date timestamptz, p_total_value numeric,
+  p_xml_content text, p_items jsonb, p_registrado_por text
+) returns void as $$
+declare
+  v_item jsonb;
+  v_item_id text;
+  v_is_new boolean;
+  v_category text;
+  v_name text;
+  v_unit text;
+  v_min numeric;
+  v_ideal numeric;
+  v_qty numeric;
+  v_unit_value numeric;
+  v_ean text;
+  v_old_qty numeric;
+  v_old_avg numeric;
+  v_new_qty numeric;
+  v_new_avg numeric;
+  v_movement_id text;
+  v_seq integer := 0;
+begin
+  insert into invoices (id, supplier_cnpj, supplier_name, number, series, access_key, issue_date, total_value, item_count, xml_content, imported_by)
+  values (p_invoice_id, p_supplier_cnpj, p_supplier_name, p_number, p_series, p_access_key, p_issue_date, p_total_value, jsonb_array_length(p_items), p_xml_content, p_registrado_por);
+
+  for v_item in select * from jsonb_array_elements(p_items) loop
+    v_item_id := v_item->>'item_id';
+    v_is_new := coalesce((v_item->>'is_new')::boolean, false);
+    v_unit := coalesce(v_item->>'unit', 'un');
+    v_qty := (v_item->>'qty')::numeric;
+    v_unit_value := coalesce((v_item->>'unit_value')::numeric, 0);
+    v_ean := nullif(v_item->>'ean', '');
+
+    if v_is_new then
+      v_category := v_item->>'category';
+      v_name := v_item->>'name';
+      v_min := coalesce((v_item->>'min')::numeric, 0);
+      v_ideal := coalesce((v_item->>'ideal')::numeric, 0);
+
+      insert into items (id, category, name, unit, qty, min, ideal, avg_cost)
+      values (v_item_id, v_category, v_name, v_unit, 0, v_min, v_ideal, 0);
+
+      insert into audit_log (id, entity_type, entity_id, action, description, snapshot, performed_by, occurred_at)
+      values (
+        v_item_id || '-log-' || floor(extract(epoch from clock_timestamp()))::text,
+        'item', v_item_id, 'criado',
+        'Item "' || v_name || '" criado via importação da nota fiscal nº ' || coalesce(p_number, '?'),
+        jsonb_build_object('id', v_item_id, 'category', v_category, 'name', v_name, 'unit', v_unit, 'min', v_min, 'ideal', v_ideal, 'invoice_id', p_invoice_id),
+        p_registrado_por, now()
+      );
+    end if;
+
+    select qty, avg_cost, name, category, unit into v_old_qty, v_old_avg, v_name, v_category, v_unit
+    from items where id = v_item_id for update;
+
+    if not found then
+      raise exception 'Item % não encontrado', v_item_id;
+    end if;
+
+    v_new_qty := v_old_qty + v_qty;
+    v_new_avg := case when v_new_qty > 0 then ((v_old_qty * v_old_avg) + (v_qty * v_unit_value)) / v_new_qty else 0 end;
+    update items set qty = v_new_qty, avg_cost = v_new_avg where id = v_item_id;
+
+    v_movement_id := p_invoice_id || '-it' || v_seq::text;
+
+    insert into movements (id, type, item_id, item_name, category_key, unit, qty, unit_value, total_value, note, invoice_id, occurred_at, registered_by)
+    values (
+      v_movement_id, 'entrada', v_item_id, v_name, v_category, v_unit, v_qty, v_unit_value, v_qty * v_unit_value,
+      'Nota fiscal nº ' || coalesce(p_number, '?') || case when p_supplier_name is not null then ' — ' || p_supplier_name else '' end,
+      p_invoice_id, now(), p_registrado_por
+    );
+
+    insert into audit_log (id, entity_type, entity_id, action, description, snapshot, performed_by, occurred_at)
+    values (
+      v_movement_id || '-log', 'movement', v_movement_id, 'entrada',
+      'Entrada de ' || v_qty || ' ' || coalesce(v_unit,'') || ' em "' || coalesce(v_name,'?') || '" via nota fiscal nº ' || coalesce(p_number,'?'),
+      jsonb_build_object('movement_id', v_movement_id, 'item_id', v_item_id, 'item_name', v_name, 'qty', v_qty, 'unit_value', v_unit_value, 'invoice_id', p_invoice_id),
+      p_registrado_por, now()
+    );
+
+    if v_ean is not null then
+      insert into item_supplier_links (supplier_cnpj, ean, item_id, updated_at)
+      values (p_supplier_cnpj, v_ean, v_item_id, now())
+      on conflict (supplier_cnpj, ean) do update set item_id = excluded.item_id, updated_at = now();
+    end if;
+
+    v_seq := v_seq + 1;
+  end loop;
+end;
+$$ language plpgsql security definer;
+
 grant execute on function criar_item_inicial to anon, authenticated;
 grant execute on function registrar_entrada to anon, authenticated;
 grant execute on function registrar_saida to anon, authenticated;
@@ -333,6 +470,7 @@ grant execute on function excluir_item to anon, authenticated;
 grant execute on function excluir_movimento to anon, authenticated;
 grant execute on function purgar_periodo to anon, authenticated;
 grant execute on function get_db_size to anon, authenticated;
+grant execute on function importar_nota_fiscal to anon, authenticated;
 
 -- Habilita o Supabase Realtime nas tabelas do app, para que o
 -- front-end receba as mudanças na hora (sem precisar clicar em
@@ -343,5 +481,7 @@ alter publication supabase_realtime add table categories;
 alter publication supabase_realtime add table branches;
 alter publication supabase_realtime add table users;
 alter publication supabase_realtime add table audit_log;
+alter publication supabase_realtime add table invoices;
+alter publication supabase_realtime add table item_supplier_links;
 
 -- Fim do script. Se tudo rodou sem erro, seu banco está pronto.
