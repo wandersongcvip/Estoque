@@ -138,6 +138,19 @@
   var CHANGELOG_SEEN_KEY = "estoque-changelog-visto-v1";
   var CHANGELOG = [
     {
+      version: "1.6",
+      date: "06/10/2026",
+      title: "Login seguro e várias empresas",
+      items: [
+        "O login agora é por e-mail e senha, com proteção de verdade: as senhas ficam guardadas de forma segura e quem não tem conta não consegue ver nem alterar nenhum dado.",
+        "O STOCKAR agora aceita várias empresas, cada uma enxergando somente os próprios dados.",
+        "Em Admin, o administrador edita o nome e o logo da empresa e cadastra, edita ou exclui pessoas (nome, e-mail, perfil e senha). O e-mail de uma pessoa pode ser trocado quando precisar.",
+        "As categorias agora podem ser renomeadas, mudar de cor e ser excluídas quando estiverem vazias.",
+        "O link do painel para visualização agora tem um código secreto. O link antigo deixou de funcionar: copie o novo no botão \"Copiar link do painel\".",
+        "Senhas novas precisam ter pelo menos 8 caracteres."
+      ]
+    },
+    {
       version: "1.5",
       date: "06/10/2026",
       title: "Backup completo e proteção dos registros de 5 anos",
@@ -214,6 +227,15 @@
     users: [],
     currentUser: null,
     loginError: "",
+    loginEmail: "",
+    loginBusy: false,
+    company: null,
+    brandDraft: null,
+    brandMsg: null,
+    publicError: "",
+    userDraft: null,
+    editingCategoryKey: null,
+    confirmDeleteCategory: null,
     addingUser: false,
     editingUserId: null,
     userFormError: "",
@@ -486,31 +508,44 @@
 
   // ---------- autenticação ----------
 
-  function hashPass(str) {
-    str = String(str == null ? "" : str);
-    var h = 5381;
-    for (var i = 0; i < str.length; i++) {
-      h = ((h * 33) ^ str.charCodeAt(i)) >>> 0;
+  var realtimeStarted = false;
+
+  function mapProfile(row) {
+    return { id: row.user_id, username: row.display_name, email: row.email || "", role: row.role, createdAt: row.created_at };
+  }
+
+  // Gerenciar pessoas (criar, trocar e-mail/senha, excluir) exige poder de
+  // administrador no servidor, por isso passa por uma função segura do
+  // Supabase (Edge Function) e não direto pelo navegador.
+  async function callAdminUsers(body) {
+    var res = await supabaseClient.functions.invoke("admin-usuarios", { body: body });
+    if (res.error) {
+      var msg = "Não foi possível concluir. Tente novamente.";
+      try {
+        if (res.error.context && res.error.context.json) {
+          var j = await res.error.context.json();
+          if (j && j.erro) msg = j.erro;
+        }
+      } catch (e) {}
+      return { ok: false, erro: msg };
     }
-    return h.toString(16) + "_" + str.length.toString(16);
+    return { ok: true, data: res.data };
   }
 
   async function loadUsers() {
-    var res = await supabaseClient.from("users").select("*").order("created_at");
-    if (res.error) { state.globalError = "Não foi possível carregar os usuários: " + res.error.message; state.users = []; return; }
-    state.users = (res.data || []).map(mapUserFromDb);
-  }
-
-  function mapUserFromDb(row) {
-    return { id: row.id, username: row.username, passwordHash: row.password_hash, role: row.role, createdAt: row.created_at };
-  }
-
-  function findUserByUsername(username) {
-    var uname = String(username == null ? "" : username).trim().toLowerCase();
-    for (var i = 0; i < state.users.length; i++) {
-      if (state.users[i].username.toLowerCase() === uname) return state.users[i];
+    if (!state.currentUser) { state.users = []; return; }
+    if (isAdmin()) {
+      var r = await callAdminUsers({ acao: "listar" });
+      if (r.ok && r.data && r.data.usuarios) {
+        state.users = r.data.usuarios.map(function (u) {
+          return { id: u.user_id, username: u.nome, email: u.email || "", role: u.role, createdAt: u.created_at };
+        });
+        return;
+      }
     }
-    return null;
+    var res = await supabaseClient.from("profiles").select("user_id,display_name,role,created_at").order("created_at");
+    if (res.error) { state.globalError = "Não foi possível carregar os usuários: " + res.error.message; state.users = []; return; }
+    state.users = (res.data || []).map(mapProfile);
   }
 
   function findUserById(id) {
@@ -518,20 +553,20 @@
     return null;
   }
 
-  function loadSession() {
-    state.currentUser = null;
-    try {
-      var raw = localStorage.getItem(SESSION_KEY);
-      var username = raw ? JSON.parse(raw).username : null;
-      if (username) state.currentUser = findUserByUsername(username) || null;
-    } catch (e) { state.currentUser = null; }
-  }
-
-  function persistSession() {
-    try {
-      if (state.currentUser) localStorage.setItem(SESSION_KEY, JSON.stringify({ username: state.currentUser.username }));
-      else localStorage.removeItem(SESSION_KEY);
-    } catch (e) {}
+  // Lê a sessão do login seguro (Supabase Auth) e carrega quem é a pessoa
+  // e a empresa dela. Retorna false se não houver sessão válida.
+  async function loadProfile() {
+    state.currentUser = null; state.company = null;
+    var s = await supabaseClient.auth.getSession();
+    var session = s && s.data && s.data.session;
+    if (!session) return false;
+    var pRes = await supabaseClient.from("profiles").select("user_id,display_name,role,company_id").eq("user_id", session.user.id).maybeSingle();
+    if (pRes.error || !pRes.data) return false;
+    var cRes = await supabaseClient.from("companies").select("id,name,logo_url,dashboard_token").eq("id", pRes.data.company_id).maybeSingle();
+    state.currentUser = { id: session.user.id, username: pRes.data.display_name, email: session.user.email || "", role: pRes.data.role, companyId: pRes.data.company_id };
+    var c = cRes && cRes.data;
+    state.company = c ? { id: c.id, name: c.name, logoUrl: c.logo_url, token: c.dashboard_token } : { id: pRes.data.company_id, name: "", logoUrl: null, token: null };
+    return true;
   }
 
   function isAdmin() { return !!(state.currentUser && state.currentUser.role === "admin"); }
@@ -552,41 +587,60 @@
     render();
   }
 
-  function doLogin() {
+  async function doLogin() {
+    if (state.loginBusy) return;
     var userEl = document.getElementById("login-user");
     var passEl = document.getElementById("login-pass");
-    var username = userEl ? userEl.value.trim() : "";
+    var email = userEl ? userEl.value.trim() : "";
     var pass = passEl ? passEl.value : "";
-    if (!username || !pass) {
-      state.loginError = "Informe usuário e senha.";
+    state.loginEmail = email;
+    if (!email || !pass) {
+      state.loginError = "Informe e-mail e senha.";
       render();
       return;
     }
-    var u = findUserByUsername(username);
-    if (!u || u.passwordHash !== hashPass(pass)) {
-      state.loginError = "Usuário ou senha inválidos.";
+    state.loginBusy = true; state.loginError = ""; render();
+    var res = await supabaseClient.auth.signInWithPassword({ email: email, password: pass });
+    if (res.error) {
+      state.loginBusy = false;
+      state.loginError = "E-mail ou senha inválidos.";
       render();
       return;
     }
-    state.currentUser = u;
-    state.loginError = "";
-    state.activeTab = "dashboard";
-    persistSession();
+    var ok = await loadProfile();
+    if (!ok) {
+      try { await supabaseClient.auth.signOut(); } catch (e) {}
+      state.loginBusy = false;
+      state.loginError = "Esta conta não está ligada a nenhuma empresa. Fale com o suporte do STOCKAR.";
+      render();
+      return;
+    }
+    state.loading = true; state.activeTab = "dashboard"; state.globalError = "";
+    await refreshAllData();
+    state.loading = false; state.loginBusy = false; state.loginEmail = "";
     checkChangelog();
+    startRealtime();
     render();
   }
 
-  function doLogout() {
-    state.currentUser = null;
+  function resetAfterLogout() {
+    stopRealtime();
+    state.currentUser = null; state.company = null;
+    state.items = []; state.movements = []; state.categories = []; state.branches = [];
+    state.users = []; state.auditLog = []; state.invoices = []; state.dbSizeBytes = null;
     state.activeTab = "dashboard";
-    state.adding = false;
-    state.editingId = null;
-    state.addingUser = false;
-    state.editingUserId = null;
-    state.passwordError = "";
-    state.passwordSuccess = false;
-    persistSession();
+    state.adding = false; state.editingId = null;
+    state.addingUser = false; state.editingUserId = null;
+    state.addingCategory = false; state.editingCategoryKey = null; state.confirmDeleteCategory = null;
+    state.passwordError = ""; state.passwordSuccess = false;
+    state.nfReview = null; state.showChangelog = false; state.globalError = "";
+    state.brandDraft = null; state.brandMsg = null;
     render();
+  }
+
+  async function doLogout() {
+    try { await supabaseClient.auth.signOut(); } catch (e) {}
+    if (state.currentUser) resetAfterLogout();
   }
 
   async function doChangePassword() {
@@ -595,13 +649,13 @@
     var nw = (document.getElementById("chpwd-new") || {}).value || "";
     var conf = (document.getElementById("chpwd-confirm") || {}).value || "";
     state.passwordSuccess = false;
-    if (hashPass(cur) !== state.currentUser.passwordHash) {
-      state.passwordError = "Senha atual incorreta.";
+    if (!cur) {
+      state.passwordError = "Informe a senha atual.";
       render();
       return;
     }
-    if (!nw || nw.length < 4) {
-      state.passwordError = "A nova senha deve ter ao menos 4 caracteres.";
+    if (!nw || nw.length < 8) {
+      state.passwordError = "A nova senha deve ter ao menos 8 caracteres.";
       render();
       return;
     }
@@ -611,16 +665,20 @@
       return;
     }
     state.saving = true; render();
-    var newHash = hashPass(nw);
-    var res = await supabaseClient.from("users").update({ password_hash: newHash }).eq("id", state.currentUser.id);
-    state.saving = false;
-    if (res.error) {
-      state.passwordError = "Não foi possível salvar a nova senha: " + res.error.message;
+    var chk = await supabaseClient.auth.signInWithPassword({ email: state.currentUser.email, password: cur });
+    if (chk.error) {
+      state.saving = false;
+      state.passwordError = "Senha atual incorreta.";
       render();
       return;
     }
-    var u = findUserById(state.currentUser.id);
-    if (u) { u.passwordHash = newHash; state.currentUser = u; }
+    var upd = await supabaseClient.auth.updateUser({ password: nw });
+    state.saving = false;
+    if (upd.error) {
+      state.passwordError = "Não foi possível salvar a nova senha: " + upd.error.message;
+      render();
+      return;
+    }
     state.passwordError = "";
     state.passwordSuccess = true;
     render();
@@ -1012,15 +1070,16 @@
     return header + errBlock + rows + actions;
   }
 
-  function categoryFormHTML() {
+  function categoryFormHTML(initial) {
+    var v = initial || { key: "", label: "", color: "#4F46E5" };
     return '<div class="est-form">' +
       (state.categoryFormError ? '<div class="est-login-msg est-login-error">' + esc(state.categoryFormError) + '</div>' : '') +
       '<div class="est-form-grid">' +
-      '<div class="est-field" style="flex-basis:60%"><label class="est-label">Nome da categoria</label><input class="est-input" id="cf-name" placeholder="Ex.: Ferramentas"/></div>' +
-      '<div class="est-field" style="flex-basis:90px;min-width:70px"><label class="est-label">Cor</label><input class="est-input" type="color" id="cf-color" value="#4F46E5" style="padding:2px;height:33px"/></div>' +
+      '<div class="est-field" style="flex-basis:60%"><label class="est-label">Nome da categoria</label><input class="est-input" id="cf-name" placeholder="Ex.: Ferramentas" value="' + esc(v.label) + '"/></div>' +
+      '<div class="est-field" style="flex-basis:90px;min-width:70px"><label class="est-label">Cor</label><input class="est-input" type="color" id="cf-color" value="' + esc(v.color) + '" style="padding:2px;height:33px"/></div>' +
       "</div>" +
       '<div style="display:flex;gap:8px">' +
-      '<button class="est-btn est-btn-primary" data-action="save-category">' + ICON.check + " Salvar</button>" +
+      '<button class="est-btn est-btn-primary" data-action="save-category" data-id="' + esc(v.key) + '">' + ICON.check + " Salvar</button>" +
       '<button class="est-btn" data-action="cancel-category-form">' + ICON.x + " Cancelar</button>" +
       "</div></div>";
   }
@@ -1049,14 +1108,19 @@
       (navigable && isAdmin() && !state.addingCategory ? '<button class="est-btn" data-action="show-add-category">' + ICON.plus + " Nova categoria</button>" : "") +
       "</div>";
 
-    var categoryFormBlock = (navigable && isAdmin() && state.addingCategory) ? categoryFormHTML() : "";
+    var editingCat = state.editingCategoryKey ? catMeta(state.editingCategoryKey) : null;
+    var categoryFormBlock = (navigable && isAdmin() && state.addingCategory) ? categoryFormHTML(null)
+      : ((navigable && isAdmin() && editingCat && editingCat.key === state.editingCategoryKey) ? categoryFormHTML(editingCat) : "");
 
     var catGrid = catGridHeader + categoryFormBlock + '<div class="est-catgrid">' +
       state.categories.map(function (c) {
         var d = byCat[c.key] || { baixo: 0, medio: 0, ok: 0, total: 0 };
         return '<div class="est-catcard" ' + (navigable ? 'data-action="goto-cat" data-cat="' + c.key + '"' : "") +
           ' style="cursor:' + (navigable ? "pointer" : "default") + '">' +
-          '<div class="est-catcard-top"><span class="est-dot" style="background:' + c.color + '"></span>' + esc(c.label) + "</div>" +
+          '<div class="est-catcard-top"><span class="est-dot" style="background:' + c.color + '"></span><span style="flex:1">' + esc(c.label) + "</span>" +
+          ((navigable && isAdmin()) ? (state.confirmDeleteCategory === c.key
+            ? '<span style="font-size:11.5px;color:#DC2626">Excluir?</span><button class="est-btn est-btn-ghost" data-action="confirm-delete-category" data-id="' + esc(c.key) + '" title="Confirmar exclusão">' + ICON.check + '</button><button class="est-btn est-btn-ghost" data-action="cancel-delete-category" title="Cancelar">' + ICON.x + '</button>'
+            : '<button class="est-btn est-btn-ghost" data-action="edit-category" data-id="' + esc(c.key) + '" title="Editar categoria">' + ICON.edit + '</button><button class="est-btn est-btn-ghost" data-action="ask-delete-category" data-id="' + esc(c.key) + '" title="Excluir categoria">' + ICON.trash + '</button>') : "") + "</div>" +
           '<div class="est-catcard-counts est-num">' +
           '<span style="color:' + STATUS_META.baixo.color + '">' + d.baixo + "</span>" +
           '<span style="color:' + STATUS_META.medio.color + '">' + d.medio + "</span>" +
@@ -1209,25 +1273,28 @@
     return '<div class="est-login-wrap"><div class="est-login-card">' +
       '<div class="est-login-logo">' + LOGO_SVG + '</div>' +
       '<div class="est-login-title">Controle de estoque</div>' +
-      '<div class="est-login-sub">Entre com seu usuário e senha</div>' +
+      '<div class="est-login-sub">Entre com seu e-mail e senha</div>' +
       (state.loginError ? '<div class="est-login-msg est-login-error">' + esc(state.loginError) + '</div>' : '') +
-      '<div class="est-login-field"><label class="est-label">Usuário</label><input class="est-input" id="login-user" autocomplete="username"/></div>' +
+      '<div class="est-login-field"><label class="est-label">E-mail</label><input class="est-input" type="email" id="login-user" autocomplete="username" value="' + esc(state.loginEmail) + '"/></div>' +
       '<div class="est-login-field"><label class="est-label">Senha</label><input class="est-input" type="password" id="login-pass" autocomplete="current-password"/></div>' +
-      '<button class="est-btn est-btn-primary est-login-btn" data-action="login-submit">Entrar</button>' +
+      '<button class="est-btn est-btn-primary est-login-btn" data-action="login-submit"' + (state.loginBusy ? " disabled" : "") + '>' + (state.loginBusy ? "Entrando…" : "Entrar") + '</button>' +
       '</div></div>';
   }
 
   function userFormHTML(initial) {
-    var v = initial || { username: "", role: "editor" };
+    var v = initial || { username: "", email: "", role: "editor" };
+    var dr = state.userDraft;
+    if (dr && dr.id === (initial ? initial.id : "")) v = { id: v.id, username: dr.username, email: dr.email, role: dr.role };
     return '<div class="est-form">' +
       (state.userFormError ? '<div class="est-login-msg est-login-error">' + esc(state.userFormError) + '</div>' : '') +
       '<div class="est-form-grid">' +
-      '<div class="est-field"><label class="est-label">Usuário</label><input class="est-input" id="uf-username" value="' + esc(v.username) + '" placeholder="nome de usuário"' + (initial ? " disabled" : "") + '/></div>' +
+      '<div class="est-field"><label class="est-label">Nome</label><input class="est-input" id="uf-username" value="' + esc(v.username) + '" placeholder="Nome da pessoa"/></div>' +
+      '<div class="est-field"><label class="est-label">E-mail (é o login)</label><input class="est-input" type="email" id="uf-email" value="' + esc(v.email) + '" placeholder="pessoa@empresa.com"/></div>' +
       '<div class="est-field"><label class="est-label">Perfil</label><select class="est-select" id="uf-role" style="width:100%">' +
       '<option value="editor"' + (v.role === "editor" ? " selected" : "") + '>Editor (edita e lança itens)</option>' +
       '<option value="admin"' + (v.role === "admin" ? " selected" : "") + '>Administrador (gerencia usuários)</option>' +
       "</select></div>" +
-      '<div class="est-field"><label class="est-label">' + (initial ? "Nova senha (opcional)" : "Senha") + '</label><input class="est-input" type="password" id="uf-password" placeholder="' + (initial ? "deixe em branco para manter" : "senha") + '"/></div>' +
+      '<div class="est-field"><label class="est-label">' + (initial ? "Nova senha (opcional)" : "Senha provisória") + '</label><input class="est-input" type="password" id="uf-password" autocomplete="new-password" placeholder="' + (initial ? "deixe em branco para manter" : "mínimo 8 caracteres") + '"/></div>' +
       "</div>" +
       '<div style="display:flex;gap:8px">' +
       '<button class="est-btn est-btn-primary" data-action="save-user" data-id="' + (initial ? initial.id : "") + '">' + ICON.check + " Salvar</button>" +
@@ -1252,7 +1319,7 @@
         var isSelf = state.currentUser && state.currentUser.id === u.id;
         return '<div class="est-row">' +
           '<div style="flex:1"><div class="est-row-name">' + esc(u.username) + (isSelf ? ' <span style="color:#8A8F98;font-weight:400">(você)</span>' : "") + "</div>" +
-          '<div class="est-row-meta">Criado em ' + esc(new Date(u.createdAt).toLocaleDateString("pt-BR")) + "</div></div>" +
+          '<div class="est-row-meta">' + esc(u.email || "") + ' · Criado em ' + esc(new Date(u.createdAt).toLocaleDateString("pt-BR")) + "</div></div>" +
           '<span class="est-role-badge">' + (u.role === "admin" ? "Administrador" : "Editor") + "</span>" +
           '<button class="est-btn est-btn-ghost" data-action="edit-user" data-id="' + u.id + '" title="Editar">' + ICON.edit + "</button>" +
           (!isSelf ? '<button class="est-btn est-btn-ghost" data-action="delete-user" data-id="' + u.id + '" title="Excluir">' + ICON.trash + "</button>" : "") +
@@ -1277,16 +1344,36 @@
       "</div></div>";
   }
 
+  function brandSectionHTML() {
+    var cur = state.brandDraft || { name: state.company ? state.company.name : "", logoUrl: state.company ? state.company.logoUrl : null };
+    var prev = (cur.logoUrl && String(cur.logoUrl).indexOf("data:image/") === 0)
+      ? '<img src="' + esc(cur.logoUrl) + '" alt="" style="max-height:56px;max-width:200px;object-fit:contain"/>'
+      : '<span class="est-row-meta">Sem logo (aparece o logo do STOCKAR)</span>';
+    var msg = state.brandMsg ? '<div class="est-login-msg ' + (state.brandMsg.type === "error" ? "est-login-error" : "est-login-success") + '">' + esc(state.brandMsg.text) + '</div>' : "";
+    return '<div style="border-top:1px solid #E5E7EB;padding-top:22px;margin-bottom:30px">' +
+      '<h2 class="est-h2" style="margin:0 0 4px">Minha empresa</h2>' +
+      '<div class="est-row-meta" style="margin-bottom:12px">Nome e logo que aparecem no topo do sistema.</div>' +
+      '<div class="est-form">' + msg +
+      '<div class="est-form-grid">' +
+      '<div class="est-field"><label class="est-label">Nome da empresa</label><input class="est-input" id="brand-name" value="' + esc(cur.name) + '" maxlength="80"/></div>' +
+      '<div class="est-field"><label class="est-label">Logo (imagem)</label><div style="display:flex;align-items:center;gap:10px;min-height:33px">' + prev + '</div>' +
+      '<input type="file" id="brand-logo-file" accept="image/png,image/jpeg,image/webp,image/svg+xml" style="margin-top:6px;font-size:12px"/></div>' +
+      '</div><div style="display:flex;gap:8px">' +
+      '<button class="est-btn est-btn-primary" data-action="save-brand"' + (state.saving ? " disabled" : "") + '>' + ICON.check + ' Salvar</button>' +
+      (cur.logoUrl ? '<button class="est-btn" data-action="remove-brand-logo">' + ICON.x + ' Remover logo</button>' : '') +
+      '</div></div></div>';
+  }
+
   function renderAdminPage() {
     var pwdSection = '<div style="margin-bottom:30px">' +
       '<h2 class="est-h2" style="margin:0 0 4px">Minha conta</h2>' +
-      '<div class="est-row-meta" style="margin-bottom:12px">Usuário: <b>' + esc(state.currentUser.username) + '</b> · ' + (isAdmin() ? "Administrador" : "Editor") + "</div>" +
+      '<div class="est-row-meta" style="margin-bottom:12px"><b>' + esc(state.currentUser.username) + '</b> · ' + esc(state.currentUser.email) + ' · ' + (isAdmin() ? "Administrador" : "Editor") + "</div>" +
       changePasswordFormHTML() +
       "</div>";
 
     if (!isAdmin()) return pwdSection;
 
-    return pwdSection + '<div style="border-top:1px solid #E5E7EB;padding-top:22px">' + renderUsersPage() + "</div>";
+    return pwdSection + brandSectionHTML() + '<div style="border-top:1px solid #E5E7EB;padding-top:22px">' + renderUsersPage() + "</div>";
   }
 
   // ---------- relatórios ----------
@@ -1541,14 +1628,14 @@
   async function downloadFullBackup() {
     state.downloadMsg = null; state.backupBusy = true; render();
     try {
-      var spec = [["categories", "key"], ["branches", "key"], ["users", "id"], ["items", "id"], ["movements", "id"],
+      var spec = [["categories", "key"], ["branches", "key"], ["companies", "id"], ["profiles", "user_id"], ["items", "id"], ["movements", "id"],
         ["audit_log", "id"], ["invoices", "id"], ["item_supplier_links", "supplier_cnpj"]];
       var results = await Promise.all(spec.map(function (t) { return fetchAllRows(t[0], t[1]); }));
       var data = {};
       var counts = [];
       spec.forEach(function (t, i) {
         var rows = results[i];
-        if (t[0] === "users") rows = rows.map(function (u) { var c = {}; Object.keys(u).forEach(function (k) { if (k !== "password_hash") c[k] = u[k]; }); return c; });
+        if (t[0] === "companies") rows = rows.map(function (u) { var c = {}; Object.keys(u).forEach(function (k) { if (k !== "dashboard_token") c[k] = u[k]; }); return c; });
         data[t[0]] = rows;
         counts.push(t[0] + ": " + rows.length);
       });
@@ -1754,9 +1841,13 @@
 
     var headerRight = '<div class="est-header-right-col">' + topRow + bottomRow + "</div>";
 
-    var header = '<div class="est-header"><div class="est-brand"><div class="est-logo-mark">' + LOGO_SVG + '</div><div>' +
-      '<div class="est-title">Controle de estoque</div>' +
-      (showDashboardOnly ? '<div class="est-sub">Painel · somente leitura</div>' : "") +
+    var brandLogo = (state.company && state.company.logoUrl && String(state.company.logoUrl).indexOf("data:image/") === 0)
+      ? '<img src="' + esc(state.company.logoUrl) + '" alt="" style="height:38px;max-width:170px;object-fit:contain;display:block"/>'
+      : LOGO_SVG;
+    var brandName = (state.company && state.company.name) ? state.company.name : "Controle de estoque";
+    var header = '<div class="est-header"><div class="est-brand"><div class="est-logo-mark">' + brandLogo + '</div><div>' +
+      '<div class="est-title">' + esc(brandName) + '</div>' +
+      (showDashboardOnly ? '<div class="est-sub">Painel · somente leitura</div>' : '<div class="est-sub">STOCKAR · controle de estoque</div>') +
       "</div></div>" + headerRight + "</div>";
 
     var errorBanner = (!showDashboardOnly && state.globalError) ?
@@ -1790,6 +1881,8 @@
       main = '<div class="est-empty">Carregando estoque…</div>';
     } else if (state.nfReview && !showDashboardOnly) {
       main = renderNfReviewPage();
+    } else if (forceView && state.publicError) {
+      main = '<div class="est-empty">' + esc(state.publicError) + '</div>';
     } else if (showDashboardOnly) {
       main = renderDashboard(state.items, false);
     } else if (state.activeTab === "dashboard") {
@@ -1862,17 +1955,23 @@
       doChangePassword();
     } else if (action === "show-add-user") {
       if (!isAdmin()) return;
-      state.addingUser = true; state.editingUserId = null; state.userFormError = ""; render();
+      state.addingUser = true; state.editingUserId = null; state.userFormError = ""; state.userDraft = null; render();
     } else if (action === "cancel-user-form") {
-      state.addingUser = false; state.editingUserId = null; state.userFormError = ""; render();
+      state.addingUser = false; state.editingUserId = null; state.userFormError = ""; state.userDraft = null; render();
     } else if (action === "edit-user") {
       if (!isAdmin()) return;
-      state.editingUserId = id; state.addingUser = false; state.userFormError = ""; render();
+      state.editingUserId = id; state.addingUser = false; state.userFormError = ""; state.userDraft = null; render();
     } else if (action === "save-user") {
       if (!isAdmin()) return;
+      var nameVal = ((document.getElementById("uf-username") || {}).value || "").trim();
+      var emailVal = ((document.getElementById("uf-email") || {}).value || "").trim();
       var roleVal = (document.getElementById("uf-role") || {}).value || "editor";
       var passVal = (document.getElementById("uf-password") || {}).value || "";
+      state.userDraft = { id: id || "", username: nameVal, email: emailVal, role: roleVal };
       state.userFormError = "";
+      if (!nameVal) { state.userFormError = "Informe o nome da pessoa."; render(); return; }
+      if (!emailVal) { state.userFormError = "Informe o e-mail da pessoa."; render(); return; }
+      if (passVal && passVal.length < 8) { state.userFormError = "A senha precisa ter ao menos 8 caracteres."; render(); return; }
       if (id) {
         var target = findUserById(id);
         if (!target) { state.addingUser = false; state.editingUserId = null; render(); return; }
@@ -1880,29 +1979,24 @@
           var adminCount1 = state.users.filter(function (u) { return u.role === "admin"; }).length;
           if (adminCount1 <= 1) { state.userFormError = "Não é possível remover o último administrador."; render(); return; }
         }
-        var userUpdates = { role: roleVal };
-        if (passVal) userUpdates.password_hash = hashPass(passVal);
         state.saving = true; render();
-        var uRes = await supabaseClient.from("users").update(userUpdates).eq("id", id);
+        var uRes = await callAdminUsers({ acao: "atualizar", user_id: id, nome: nameVal, email: emailVal, role: roleVal, senha: passVal });
         state.saving = false;
-        if (uRes.error) { state.userFormError = "Não foi possível salvar: " + uRes.error.message; render(); return; }
-        target.role = roleVal;
-        if (passVal) target.passwordHash = hashPass(passVal);
-        if (state.currentUser && state.currentUser.id === target.id) state.currentUser = target;
-        state.editingUserId = null;
+        if (!uRes.ok) { state.userFormError = uRes.erro; render(); return; }
+        await loadUsers();
+        if (state.currentUser && state.currentUser.id === id) {
+          state.currentUser.username = nameVal; state.currentUser.role = roleVal; state.currentUser.email = emailVal.toLowerCase();
+        }
+        state.editingUserId = null; state.userDraft = null;
         render();
       } else {
-        var unameVal = ((document.getElementById("uf-username") || {}).value || "").trim();
-        if (!unameVal) { state.userFormError = "Informe um nome de usuário."; render(); return; }
-        if (findUserByUsername(unameVal)) { state.userFormError = "Já existe um usuário com esse nome."; render(); return; }
-        if (!passVal) { state.userFormError = "Informe uma senha."; render(); return; }
-        var newUserRow = { id: uid(), username: unameVal, password_hash: hashPass(passVal), role: roleVal, created_at: new Date().toISOString() };
+        if (!passVal) { state.userFormError = "Informe uma senha provisória (mínimo 8 caracteres)."; render(); return; }
         state.saving = true; render();
-        var insRes = await supabaseClient.from("users").insert(newUserRow);
+        var cRes = await callAdminUsers({ acao: "criar", nome: nameVal, email: emailVal, role: roleVal, senha: passVal });
         state.saving = false;
-        if (insRes.error) { state.userFormError = "Não foi possível criar: " + insRes.error.message; render(); return; }
-        state.users.push(mapUserFromDb(newUserRow));
-        state.addingUser = false;
+        if (!cRes.ok) { state.userFormError = cRes.erro; render(); return; }
+        await loadUsers();
+        state.addingUser = false; state.userDraft = null;
         render();
       }
     } else if (action === "delete-user") {
@@ -1915,9 +2009,9 @@
         if (adminCount2 <= 1) { state.userFormError = "Não é possível excluir o último administrador."; render(); return; }
       }
       state.saving = true; render();
-      var dRes = await supabaseClient.from("users").delete().eq("id", id);
+      var dRes = await callAdminUsers({ acao: "excluir", user_id: id });
       state.saving = false;
-      if (dRes.error) { state.userFormError = "Não foi possível excluir: " + dRes.error.message; render(); return; }
+      if (!dRes.ok) { state.userFormError = dRes.erro; render(); return; }
       state.users = state.users.filter(function (u) { return u.id !== id; });
       render();
     } else if (action === "goto-cat") {
@@ -1940,18 +2034,69 @@
       state.purgeMsg = null;
       state.downloadMsg = null;
       if (cat === "calendario" && !state.calendarMonth) state.calendarMonth = currentMonthKey();
+      state.editingCategoryKey = null; state.confirmDeleteCategory = null; state.brandMsg = null; state.brandDraft = null;
       render();
+      if (cat === "admin" && isAdmin()) { await loadUsers(); render(); }
     } else if (action === "show-add-category") {
       if (!isAdmin()) return;
-      state.addingCategory = true; state.categoryFormError = ""; render();
+      state.addingCategory = true; state.editingCategoryKey = null; state.categoryFormError = ""; render();
     } else if (action === "cancel-category-form") {
-      state.addingCategory = false; state.categoryFormError = ""; render();
+      state.addingCategory = false; state.editingCategoryKey = null; state.categoryFormError = ""; render();
+    } else if (action === "edit-category") {
+      if (!isAdmin()) return;
+      state.editingCategoryKey = id; state.addingCategory = false; state.confirmDeleteCategory = null; state.categoryFormError = ""; render();
+    } else if (action === "ask-delete-category") {
+      if (!isAdmin()) return;
+      state.confirmDeleteCategory = id; state.editingCategoryKey = null; render();
+    } else if (action === "cancel-delete-category") {
+      state.confirmDeleteCategory = null; render();
+    } else if (action === "confirm-delete-category") {
+      if (!isAdmin()) return;
+      state.confirmDeleteCategory = null;
+      var inCat = state.items.filter(function (it) { return it.category === id; }).length;
+      if (inCat > 0) { state.globalError = "Não é possível excluir: essa categoria ainda tem " + inCat + " item(ns). Mova ou exclua os itens primeiro."; render(); return; }
+      state.saving = true; render();
+      var delCat = await supabaseClient.from("categories").delete().eq("key", id);
+      state.saving = false;
+      if (delCat.error) { state.globalError = "Não foi possível excluir a categoria: " + delCat.error.message; render(); return; }
+      state.categories = state.categories.filter(function (c) { return c.key !== id; });
+      if (state.activeTab === id) state.activeTab = "dashboard";
+      render();
+    } else if (action === "save-brand") {
+      if (!isAdmin() || !state.company) return;
+      var bName = ((document.getElementById("brand-name") || {}).value || "").trim();
+      if (!bName) { state.brandMsg = { type: "error", text: "Informe o nome da empresa." }; render(); return; }
+      var bLogo = state.brandDraft ? state.brandDraft.logoUrl : state.company.logoUrl;
+      state.saving = true; render();
+      var bRes = await supabaseClient.from("companies").update({ name: bName, logo_url: bLogo || null }).eq("id", state.company.id);
+      state.saving = false;
+      if (bRes.error) { state.brandMsg = { type: "error", text: "Não foi possível salvar: " + bRes.error.message }; render(); return; }
+      state.company.name = bName; state.company.logoUrl = bLogo || null;
+      state.brandDraft = null;
+      state.brandMsg = { type: "success", text: "Dados da empresa salvos." };
+      render();
+    } else if (action === "remove-brand-logo") {
+      if (!isAdmin()) return;
+      var curName = ((document.getElementById("brand-name") || {}).value || (state.company ? state.company.name : ""));
+      state.brandDraft = { name: curName, logoUrl: null }; state.brandMsg = null; render();
     } else if (action === "save-category") {
       if (!isAdmin()) return;
       var catName = ((document.getElementById("cf-name") || {}).value || "").trim();
       var catColor = (document.getElementById("cf-color") || {}).value || "#4F46E5";
       if (!catName) { state.categoryFormError = "Informe um nome para a categoria."; render(); return; }
-      if (findCategoryByLabel(catName)) { state.categoryFormError = "Já existe uma categoria com esse nome."; render(); return; }
+      if (!id && findCategoryByLabel(catName)) { state.categoryFormError = "Já existe uma categoria com esse nome."; render(); return; }
+      if (id) {
+        var other = findCategoryByLabel(catName);
+        if (other && other.key !== id) { state.categoryFormError = "Já existe uma categoria com esse nome."; render(); return; }
+        state.saving = true; render();
+        var updCat = await supabaseClient.from("categories").update({ label: catName, color: catColor }).eq("key", id);
+        state.saving = false;
+        if (updCat.error) { state.categoryFormError = "Não foi possível salvar: " + updCat.error.message; render(); return; }
+        var cm = catMeta(id); if (cm && cm.key === id) { cm.label = catName; cm.color = catColor; }
+        state.editingCategoryKey = null; state.categoryFormError = "";
+        render();
+        return;
+      }
       var newCatRow = { key: uniqueCategoryKey(slugify(catName)), label: catName, color: catColor };
       state.saving = true; render();
       var catRes = await insertCategory(newCatRow);
@@ -2070,7 +2215,9 @@
     } else if (action === "copy-link") {
       try {
         var url = new URL(window.location.href);
+        url.search = "";
         url.searchParams.set("view", "dashboard");
+        if (state.company && state.company.token) url.searchParams.set("t", state.company.token);
         navigator.clipboard.writeText(url.toString());
         state.copied = true;
         render();
@@ -2248,6 +2395,10 @@
       var f = e.target.files && e.target.files[0];
       if (f) handleImportFile(f);
       e.target.value = "";
+    } else if (e.target && e.target.id === "brand-logo-file") {
+      var lf = e.target.files && e.target.files[0];
+      if (lf) handleBrandLogo(lf);
+      e.target.value = "";
     } else if (e.target && e.target.id === "import-nf-file") {
       var nfFile = e.target.files && e.target.files[0];
       if (nfFile) handleNfXmlFile(nfFile);
@@ -2255,8 +2406,34 @@
     }
   });
 
+  // Reduz a imagem do logo para caber leve no banco (máx. 320x160 px).
+  function handleBrandLogo(file) {
+    if (file.size > 3 * 1024 * 1024) { state.brandMsg = { type: "error", text: "Imagem muito grande. Use um arquivo de até 3 MB." }; render(); return; }
+    var nameNow = ((document.getElementById("brand-name") || {}).value || (state.company ? state.company.name : ""));
+    var reader = new FileReader();
+    reader.onerror = function () { state.brandMsg = { type: "error", text: "Não foi possível ler a imagem." }; render(); };
+    reader.onload = function () {
+      var img = new Image();
+      img.onerror = function () { state.brandMsg = { type: "error", text: "Esse arquivo não parece ser uma imagem válida." }; render(); };
+      img.onload = function () {
+        var maxW = 320, maxH = 160;
+        var ratio = Math.min(maxW / (img.width || maxW), maxH / (img.height || maxH), 1);
+        var w = Math.max(1, Math.round((img.width || maxW) * ratio)), h = Math.max(1, Math.round((img.height || maxH) * ratio));
+        var cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+        cv.getContext("2d").drawImage(img, 0, 0, w, h);
+        var out = cv.toDataURL("image/png");
+        if (out.length > 250000) out = cv.toDataURL("image/jpeg", 0.85);
+        if (out.length > 250000) { state.brandMsg = { type: "error", text: "A imagem continua grande demais. Tente uma imagem mais simples." }; render(); return; }
+        state.brandDraft = { name: nameNow, logoUrl: out }; state.brandMsg = null; render();
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
   async function refreshAllData() {
-    await Promise.all([loadItems(), loadMovements(), loadCategories(), loadBranches(), loadUsers(), loadAuditLog(), loadDbSize(), loadInvoices()]);
+    await Promise.all([loadItems(), loadMovements(), loadCategories(), loadBranches(), loadAuditLog(), loadDbSize(), loadInvoices(),
+      (state.users.length === 0 || state.activeTab === "admin") ? loadUsers() : Promise.resolve()]);
   }
 
   // Evita que uma atualização automática em segundo plano apague o que
@@ -2284,32 +2461,63 @@
     }, 700);
   }
 
+  function stopRealtime() {
+    try { if (supabaseClient) supabaseClient.removeAllChannels(); } catch (e) {}
+    realtimeStarted = false;
+  }
+
   function startRealtime() {
-    if (!supabaseClient) return;
+    if (!supabaseClient || realtimeStarted) return;
+    realtimeStarted = true;
     var channel = supabaseClient.channel("estoque-live-changes");
-    ["items", "movements", "categories", "branches", "users", "audit_log", "invoices"].forEach(function (t) {
+    ["items", "movements", "categories", "branches", "audit_log", "invoices"].forEach(function (t) {
       channel.on("postgres_changes", { event: "*", schema: "public", table: t }, scheduleRealtimeRefresh);
     });
     channel.subscribe();
   }
 
+  // Painel público (somente leitura): protegido por um código secreto da
+  // empresa na própria URL (?view=dashboard&t=...). Não exige login.
+  async function loadPublicDashboard() {
+    var token = "";
+    try { token = new URLSearchParams(window.location.search).get("t") || ""; } catch (e) {}
+    if (!token) { state.publicError = "Este link do painel não é mais válido. Peça um novo link ao administrador."; state.loading = false; return; }
+    var res = await supabaseClient.rpc("painel_publico", { p_token: token });
+    if (res.error || !res.data) { state.publicError = "Este link do painel não é mais válido. Peça um novo link ao administrador."; state.loading = false; return; }
+    state.publicError = "";
+    state.items = (res.data.items || []).map(mapItemFromDb);
+    state.categories = res.data.categories || [];
+    var c = res.data.company || {};
+    state.company = { id: null, name: c.name || "", logoUrl: c.logo_url || null, token: null };
+    state.loading = false;
+    state.lastUpdated = new Date();
+  }
+
   async function initApp() {
     if (!supabaseConfigured) { state.loading = false; render(); return; }
-    await Promise.all([loadItems(), loadUsers(), loadCategories(), loadBranches(), loadMovements()]);
-    loadSession();
-    if (!forceView) checkChangelog();
     state.calendarMonth = currentMonthKey();
-    render();
-
-    if (!forceView) {
-      await Promise.all([loadAuditLog(), loadDbSize(), loadInvoices()]);
-      render();
-      startRealtime();
-    }
 
     if (forceView) {
-      setInterval(async function () { await loadItems(); render(); }, 20000);
+      await loadPublicDashboard();
+      render();
+      setInterval(async function () { await loadPublicDashboard(); render(); }, 20000);
+      return;
     }
+
+    supabaseClient.auth.onAuthStateChange(function (ev) {
+      if (ev === "SIGNED_OUT" && state.currentUser) resetAfterLogout();
+    });
+
+    var ok = await loadProfile();
+    if (ok) {
+      await refreshAllData();
+      checkChangelog();
+      startRealtime();
+    } else {
+      try { await supabaseClient.auth.signOut(); } catch (e) {}
+    }
+    state.loading = false;
+    render();
   }
 
   initApp();
