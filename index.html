@@ -138,6 +138,16 @@
   var CHANGELOG_SEEN_KEY = "estoque-changelog-visto-v1";
   var CHANGELOG = [
     {
+      version: "1.5",
+      date: "06/10/2026",
+      title: "Backup completo e proteção dos registros de 5 anos",
+      items: [
+        "Em Log & armazenamento, o administrador agora pode baixar um backup completo (itens, movimentações, log, notas fiscais com o XML e mais) em um único arquivo para guardar fora do Supabase.",
+        "Antes de apagar dados antigos, o app avisa que registros com menos de 5 anos devem ser guardados e só deixa apagar depois de um backup baixado.",
+        "Conferimos que o leitor de nota fiscal já funciona com os novos campos da reforma tributária (CBS e IBS) e com produtos \"sem GTIN\"."
+      ]
+    },
+    {
       version: "1.4",
       date: "06/10/2026",
       title: "Nova logo do STOCKAR",
@@ -236,7 +246,9 @@
     nfReview: null,
     nfError: "",
     nfSaving: false,
-    showChangelog: false
+    showChangelog: false,
+    backupBusy: false,
+    lastBackupAt: null
   };
 
   var DB_LIMIT_BYTES = 500 * 1024 * 1024; // limite do plano gratuito do Supabase (500 MB)
@@ -1512,6 +1524,51 @@
     render();
   }
 
+  // ---------- backup completo ----------
+
+  async function fetchAllRows(table, orderCol) {
+    var all = [], from = 0, size = 1000;
+    while (true) {
+      var res = await supabaseClient.from(table).select("*").order(orderCol, { ascending: true }).range(from, from + size - 1);
+      if (res.error) throw new Error(table + ": " + res.error.message);
+      all = all.concat(res.data || []);
+      if (!res.data || res.data.length < size) break;
+      from += size;
+    }
+    return all;
+  }
+
+  async function downloadFullBackup() {
+    state.downloadMsg = null; state.backupBusy = true; render();
+    try {
+      var spec = [["categories", "key"], ["branches", "key"], ["users", "id"], ["items", "id"], ["movements", "id"],
+        ["audit_log", "id"], ["invoices", "id"], ["item_supplier_links", "supplier_cnpj"]];
+      var results = await Promise.all(spec.map(function (t) { return fetchAllRows(t[0], t[1]); }));
+      var data = {};
+      var counts = [];
+      spec.forEach(function (t, i) {
+        var rows = results[i];
+        if (t[0] === "users") rows = rows.map(function (u) { var c = {}; Object.keys(u).forEach(function (k) { if (k !== "password_hash") c[k] = u[k]; }); return c; });
+        data[t[0]] = rows;
+        counts.push(t[0] + ": " + rows.length);
+      });
+      var payload = { app: "STOCKAR", generated_at: new Date().toISOString(), generated_by: state.currentUser ? state.currentUser.username : null,
+        note: "Backup completo. Senhas dos usuários não são incluídas.", data: data };
+      var blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url; a.download = "stockar-backup-" + todayKey() + ".json";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+      state.lastBackupAt = new Date();
+      state.downloadMsg = { type: "success", text: "Backup baixado (" + counts.join(", ") + "). Guarde o arquivo em um lugar seguro, fora do Supabase." };
+    } catch (e) {
+      state.downloadMsg = { type: "error", text: "Não foi possível gerar o backup: " + (e && e.message ? e.message : "erro desconhecido") };
+    }
+    state.backupBusy = false;
+    render();
+  }
+
   function renderLogPage() {
     var pct = state.dbSizeBytes != null ? (state.dbSizeBytes / DB_LIMIT_BYTES) * 100 : null;
     var fillClass = pct == null ? "" : (pct >= 90 ? "danger" : (pct >= 80 ? "warn" : ""));
@@ -1532,10 +1589,19 @@
 
     var msgBlock = msgBannerHTML(state.downloadMsg) + msgBannerHTML(state.purgeMsg);
 
+    var backupBlock = "";
+    if (isAdmin()) {
+      backupBlock = '<div style="margin:4px 0 22px">' +
+        '<div class="est-row-meta" style="margin-bottom:8px">Notas fiscais (XML) e registros fiscais devem ser guardados por pelo menos 5 anos. Baixe um backup completo de vez em quando e guarde fora do Supabase (as senhas dos usuários não entram no arquivo).</div>' +
+        '<button class="est-btn" data-action="download-backup"' + (state.backupBusy ? " disabled" : "") + '>' + ICON.download + (state.backupBusy ? " Gerando backup…" : " Baixar backup completo") + "</button>" +
+        (state.lastBackupAt ? '<span class="est-row-meta" style="margin-left:10px">Último backup nesta sessão: ' + timeStr(state.lastBackupAt) + "</span>" : "") +
+        "</div>";
+    }
+
     var purgeBlock = "";
     if (isAdmin()) {
       purgeBlock = '<div style="margin:4px 0 22px">' +
-        '<div class="est-row-meta" style="margin-bottom:8px">Apagar remove definitivamente as movimentações e os registros deste log anteriores à data escolhida (os itens do estoque não são afetados). Use isso para não lotar o limite gratuito do banco.</div>' +
+        '<div class="est-row-meta" style="margin-bottom:8px">Apagar remove definitivamente as movimentações e os registros deste log anteriores à data escolhida (os itens do estoque não são afetados). Use isso para não lotar o limite gratuito do banco. Para registros com menos de 5 anos, o app exige um backup completo baixado antes.</div>' +
         (!state.purgeConfirmPending ?
           ('<button class="est-btn" data-action="show-purge-confirm" style="border-color:#FCA5A5;color:#DC2626">' + ICON.trash + " Apagar dados antigos…</button>") :
           ('<div class="est-form" style="border-color:#FCA5A5;background:#FEF2F2">' +
@@ -1547,7 +1613,7 @@
         "</div>";
     }
 
-    return storageBlock + '<h2 class="est-h2">Log de auditoria</h2>' + filterBar + msgBlock + purgeBlock + '<div id="log-list">' + logContentHTML(lf) + "</div>";
+    return storageBlock + '<h2 class="est-h2">Log de auditoria</h2>' + filterBar + msgBlock + backupBlock + purgeBlock + '<div id="log-list">' + logContentHTML(lf) + "</div>";
   }
 
   // ---------- calendário ----------
@@ -2122,6 +2188,9 @@
       render();
       var reportEl = document.getElementById("report-content");
       if (reportEl) reportEl.innerHTML = reportContentHTML();
+    } else if (action === "download-backup") {
+      if (!isAdmin() || state.backupBusy) return;
+      await downloadFullBackup();
     } else if (action === "download-period") {
       if (!isAdmin()) return;
       await downloadPeriodExcel();
@@ -2134,6 +2203,12 @@
       if (!isAdmin()) return;
       var untilVal = (document.getElementById("purge-until") || {}).value || "";
       if (!untilVal) { state.purgeMsg = { type: "error", text: "Selecione uma data." }; render(); return; }
+      var nowD = new Date();
+      var fiveYearsAgoKey = localDateKey(new Date(nowD.getFullYear() - 5, nowD.getMonth(), nowD.getDate()));
+      if (untilVal > fiveYearsAgoKey && !state.lastBackupAt) {
+        state.purgeMsg = { type: "error", text: "Esta data inclui registros com menos de 5 anos (prazo de guarda fiscal). Baixe o backup completo antes de apagar." };
+        render(); return;
+      }
       var untilIso = new Date(untilVal + "T00:00:00").toISOString();
       state.purging = true; render();
       var purgeRes = await supabaseClient.rpc("purgar_periodo", { p_ate: untilIso, p_executado_por: state.currentUser.username });
