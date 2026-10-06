@@ -10,9 +10,19 @@
   body { margin:0; }
   .est-wrap { font-family:'Manrope', ui-sans-serif, system-ui, sans-serif; background:#F6F7F9; min-height:100vh; color:#1E2430; }
   .est-num { font-family:'Manrope', ui-sans-serif, system-ui, sans-serif; font-variant-numeric: tabular-nums; font-weight:700; }
-  .est-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:18px 22px; border-bottom:1px solid #E5E7EB; background:#FFFFFF; flex-wrap:wrap; }
-  .est-brand { display:flex; align-items:center; gap:10px; }
-  .est-logo-mark { height:38px; display:flex; align-items:center; flex-shrink:0; }
+  .est-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 22px 12px; border-bottom:1px solid #E5E7EB; background:#FFFFFF; flex-wrap:wrap; }
+  .est-brand { display:flex; flex-direction:column; align-items:flex-start; gap:6px; }
+  .est-logo-mark { height:24px; display:flex; align-items:center; flex-shrink:0; }
+  .est-company { display:flex; align-items:center; gap:12px; min-height:40px; }
+  .est-company-logo { height:44px; max-width:200px; object-fit:contain; display:block; }
+  .est-company-name { font-size:21px; font-weight:700; color:#1E2430; letter-spacing:-0.02em; line-height:1.15; }
+  .est-logo-add { display:inline-flex; align-items:center; gap:6px; padding:8px 12px; border:1.5px dashed #C7CAD1; border-radius:8px; background:#fff; color:#4B5563; font-size:12.5px; font-weight:500; cursor:pointer; font-family:inherit; }
+  .est-logo-add:hover { border-color:#6B7280; background:#F6F7F9; }
+  .est-sidebar-title.est-collapsible { display:flex; align-items:center; justify-content:space-between; cursor:pointer; user-select:none; border-radius:6px; padding:5px 10px; margin-bottom:4px; background:none; border:none; width:100%; font-family:inherit; text-align:left; }
+  .est-sidebar-title.est-collapsible:hover { background:#F6F7F9; color:#4B5563; }
+  .est-chev { transition:transform .15s ease; flex-shrink:0; }
+  .est-collapsed .est-chev { transform:rotate(-90deg); }
+  .est-collapsed .est-sidebar-body { display:none; }
   .est-title { font-size:13px; font-weight:600; color:#6B7280; letter-spacing:-0.01em; }
   .est-sub { font-size:12px; color:#6B7280; margin-top:1px; }
   .est-btn { display:inline-flex; align-items:center; gap:6px; padding:8px 13px; border-radius:8px; font-size:13px; font-weight:500; border:1px solid #E5E7EB; background:#fff; color:#1E2430; cursor:pointer; transition:background .15s ease, border-color .15s ease; white-space:nowrap; font-family:inherit; }
@@ -149,6 +159,8 @@
         "O link do painel para visualização agora tem um código secreto. O link antigo deixou de funcionar: copie o novo no botão \"Copiar link do painel\".",
         "Senhas novas precisam ter pelo menos 8 caracteres.",
         "Toda saída de estoque agora pede um motivo (consumo, perda ou quebra, vencimento, transferência, ajuste de inventário ou outro), que aparece no histórico e na planilha do período.",
+        "Novo visual do topo: o STOCKAR ficou menor e mais acima, e logo abaixo aparecem o logo e o nome da empresa cliente em destaque. O administrador adiciona ou troca o logo ali mesmo, com um clique.",
+        "Os grupos \"Estoque\" e \"Relatórios Gerais\" do menu lateral agora podem ser recolhidos e expandidos, e o app lembra como você deixou.",
         "Em Relatórios, o novo bloco \"Estoque em uma data\" mostra quanto havia de cada item em qualquer dia do passado, com opção de baixar em Excel."
       ]
     },
@@ -236,6 +248,7 @@
     brandMsg: null,
     publicError: "",
     userDraft: null,
+    menuCollapsed: { estoque: false, relatorios: false },
     asOf: { date: "", rows: null, error: "", busy: false },
     editingCategoryKey: null,
     confirmDeleteCategory: null,
@@ -277,6 +290,17 @@
   };
 
   var MOTIVOS_SAIDA = ["Consumo/uso", "Perda ou quebra", "Vencimento/descarte", "Transferência entre filiais", "Ajuste de inventário", "Outro"];
+
+  var MENU_KEY = "stockar-menu-v1";
+  (function loadMenuState() {
+    try {
+      var raw = localStorage.getItem(MENU_KEY);
+      if (raw) { var o = JSON.parse(raw); state.menuCollapsed.estoque = !!o.estoque; state.menuCollapsed.relatorios = !!o.relatorios; }
+    } catch (e) {}
+  })();
+  function saveMenuState() {
+    try { localStorage.setItem(MENU_KEY, JSON.stringify(state.menuCollapsed)); } catch (e) {}
+  }
 
   var DB_LIMIT_BYTES = 500 * 1024 * 1024; // limite do plano gratuito do Supabase (500 MB)
 
@@ -1875,6 +1899,15 @@
       "</div></div>";
   }
 
+  function sidebarSectionHTML(key, title, bodyHTML) {
+    var collapsed = !!state.menuCollapsed[key];
+    return '<div class="est-sidebar-section' + (collapsed ? " est-collapsed" : "") + '">' +
+      '<button type="button" class="est-sidebar-title est-collapsible" data-action="toggle-section" data-id="' + key + '" aria-expanded="' + (collapsed ? "false" : "true") + '">' +
+      '<span>' + esc(title) + '</span>' +
+      '<svg class="est-chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></button>' +
+      '<div class="est-sidebar-body">' + bodyHTML + '</div></div>';
+  }
+
   function render() {
     var root = document.getElementById("root");
     if (!supabaseConfigured) {
@@ -1911,14 +1944,22 @@
 
     var headerRight = '<div class="est-header-right-col">' + topRow + bottomRow + "</div>";
 
-    var brandLogo = (state.company && state.company.logoUrl && String(state.company.logoUrl).indexOf("data:image/") === 0)
-      ? '<img src="' + esc(state.company.logoUrl) + '" alt="" style="height:38px;max-width:170px;object-fit:contain;display:block"/>'
-      : LOGO_SVG;
-    var brandName = (state.company && state.company.name) ? state.company.name : "Controle de estoque";
-    var header = '<div class="est-header"><div class="est-brand"><div class="est-logo-mark">' + brandLogo + '</div><div>' +
-      '<div class="est-title">' + esc(brandName) + '</div>' +
-      (showDashboardOnly ? '<div class="est-sub">Painel · somente leitura</div>' : '<div class="est-sub">STOCKAR · controle de estoque</div>') +
-      "</div></div>" + headerRight + "</div>";
+    var hasLogo = !!(state.company && state.company.logoUrl && String(state.company.logoUrl).indexOf("data:image/") === 0);
+    var brandName = (state.company && state.company.name) ? state.company.name : "";
+    var companyLogoHTML = "";
+    if (hasLogo) {
+      companyLogoHTML = '<img class="est-company-logo" src="' + esc(state.company.logoUrl) + '" alt="Logo de ' + esc(brandName) + '"/>';
+    } else if (!showDashboardOnly && isAdmin()) {
+      companyLogoHTML = '<button type="button" class="est-logo-add" data-action="pick-header-logo" title="Adicionar o logo da sua empresa">' + ICON.upload + ' Adicionar logo</button>';
+    }
+    var companyEdit = (!showDashboardOnly && isAdmin() && hasLogo)
+      ? '<button type="button" class="est-btn est-btn-ghost" data-action="pick-header-logo" title="Trocar o logo da empresa" aria-label="Trocar o logo da empresa">' + ICON.edit + '</button>' : "";
+    var companyRow = (companyLogoHTML || brandName)
+      ? '<div class="est-company">' + companyLogoHTML + (brandName ? '<div class="est-company-name">' + esc(brandName) + '</div>' : "") + companyEdit + "</div>" : "";
+    var header = '<div class="est-header"><div class="est-brand"><div class="est-logo-mark">' + LOGO_SVG + '</div>' + companyRow +
+      (showDashboardOnly ? '<div class="est-sub">Painel · somente leitura</div>' : "") +
+      '<input type="file" id="header-logo-file" accept="image/png,image/jpeg,image/webp,image/svg+xml" style="display:none" tabindex="-1"/>' +
+      "</div>" + headerRight + "</div>";
 
     var errorBanner = (!showDashboardOnly && state.globalError) ?
       ('<div class="est-login-msg est-login-error">' + esc(state.globalError) + "</div>") : "";
@@ -1940,8 +1981,8 @@
       var adminItem = '<div class="est-sidebar-item' + (state.activeTab === "admin" ? " active" : "") + '" data-action="goto-cat" data-cat="admin">' + ICON.user + " " + (isAdmin() ? "Admin" : "Minha conta") + "</div>";
 
       sidebar = '<div class="est-sidebar">' +
-        '<div class="est-sidebar-section"><div class="est-sidebar-title">Estoque</div>' + estoqueItems + "</div>" +
-        '<div class="est-sidebar-section"><div class="est-sidebar-title">Relatórios Gerais</div>' + relatoriosItems + "</div>" +
+        sidebarSectionHTML("estoque", "Estoque", estoqueItems) +
+        sidebarSectionHTML("relatorios", "Relatórios Gerais", relatoriosItems) +
         '<div class="est-sidebar-section">' + adminItem + "</div>" +
         "</div>";
     }
@@ -2271,6 +2312,11 @@
       state.importMsg = { type: "success", text: "Nota fiscal importada: " + nfRows.length + " ite" + (nfRows.length === 1 ? "m lançado" : "ns lançados") + " no estoque." };
       await refreshAllData();
       render();
+    } else if (action === "toggle-section") {
+      if (state.menuCollapsed.hasOwnProperty(id)) { state.menuCollapsed[id] = !state.menuCollapsed[id]; saveMenuState(); render(); }
+    } else if (action === "pick-header-logo") {
+      if (!isAdmin()) return;
+      var hf = document.getElementById("header-logo-file"); if (hf) hf.click();
     } else if (action === "asof-run") {
       await runAsOf();
     } else if (action === "asof-download") {
@@ -2473,7 +2519,11 @@
       e.target.value = "";
     } else if (e.target && e.target.id === "brand-logo-file") {
       var lf = e.target.files && e.target.files[0];
-      if (lf) handleBrandLogo(lf);
+      if (lf) handleBrandLogo(lf, false);
+      e.target.value = "";
+    } else if (e.target && e.target.id === "header-logo-file") {
+      var hlf = e.target.files && e.target.files[0];
+      if (hlf && isAdmin()) handleBrandLogo(hlf, true);
       e.target.value = "";
     } else if (e.target && e.target.id === "import-nf-file") {
       var nfFile = e.target.files && e.target.files[0];
@@ -2483,14 +2533,29 @@
   });
 
   // Reduz a imagem do logo para caber leve no banco (máx. 320x160 px).
-  function handleBrandLogo(file) {
-    if (file.size > 3 * 1024 * 1024) { state.brandMsg = { type: "error", text: "Imagem muito grande. Use um arquivo de até 3 MB." }; render(); return; }
+  function brandLogoFail(auto, text) {
+    if (auto) state.globalError = text; else state.brandMsg = { type: "error", text: text };
+    render();
+  }
+
+  async function saveLogoNow(dataUrl) {
+    if (!state.company) return;
+    state.saving = true; render();
+    var r = await supabaseClient.from("companies").update({ logo_url: dataUrl }).eq("id", state.company.id);
+    state.saving = false;
+    if (r.error) { state.globalError = "Não foi possível salvar o logo: " + r.error.message; render(); return; }
+    state.company.logoUrl = dataUrl; state.globalError = "";
+    render();
+  }
+
+  function handleBrandLogo(file, auto) {
+    if (file.size > 3 * 1024 * 1024) { brandLogoFail(auto, "Imagem muito grande. Use um arquivo de até 3 MB."); return; }
     var nameNow = ((document.getElementById("brand-name") || {}).value || (state.company ? state.company.name : ""));
     var reader = new FileReader();
-    reader.onerror = function () { state.brandMsg = { type: "error", text: "Não foi possível ler a imagem." }; render(); };
+    reader.onerror = function () { brandLogoFail(auto, "Não foi possível ler a imagem."); };
     reader.onload = function () {
       var img = new Image();
-      img.onerror = function () { state.brandMsg = { type: "error", text: "Esse arquivo não parece ser uma imagem válida." }; render(); };
+      img.onerror = function () { brandLogoFail(auto, "Esse arquivo não parece ser uma imagem válida."); };
       img.onload = function () {
         var maxW = 320, maxH = 160;
         var ratio = Math.min(maxW / (img.width || maxW), maxH / (img.height || maxH), 1);
@@ -2499,7 +2564,8 @@
         cv.getContext("2d").drawImage(img, 0, 0, w, h);
         var out = cv.toDataURL("image/png");
         if (out.length > 250000) out = cv.toDataURL("image/jpeg", 0.85);
-        if (out.length > 250000) { state.brandMsg = { type: "error", text: "A imagem continua grande demais. Tente uma imagem mais simples." }; render(); return; }
+        if (out.length > 250000) { brandLogoFail(auto, "A imagem continua grande demais. Tente uma imagem mais simples."); return; }
+        if (auto) { saveLogoNow(out); return; }
         state.brandDraft = { name: nameNow, logoUrl: out }; state.brandMsg = null; render();
       };
       img.src = reader.result;
