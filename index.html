@@ -160,7 +160,8 @@
       items: [
         "A tela de entrada agora tem duas opções: \"Entrar\" e \"Solicitar cadastro\", para novas empresas pedirem acesso ao STOCKAR.",
         "Criada a Administração da plataforma, uma área separada das empresas, onde a equipe do STOCKAR recebe as solicitações, cria empresas e gerencia as pessoas de cada uma.",
-        "Empresas desativadas deixam de ter acesso até serem reativadas."
+        "Empresas desativadas deixam de ter acesso até serem reativadas.",
+        "Quando alguém solicita cadastro, a equipe do STOCKAR passa a receber um aviso por e-mail."
       ]
     },
     {
@@ -1388,6 +1389,8 @@
     var res = await supabaseClient.rpc("solicitar_cadastro", { p_nome: d.nome, p_email: d.email, p_telefone: d.telefone, p_empresa: d.empresa, p_cnpj: d.cnpj, p_cidade: d.cidade, p_segmento: d.segmento, p_mensagem: d.mensagem, p_site: d.site });
     state.signupBusy = false;
     if (res.error) { state.signupError = res.error.message || "Não foi possível enviar. Tente novamente."; render(); return; }
+    // avisa o dono da plataforma por e-mail (se o serviço estiver configurado); falha aqui não afeta quem solicitou
+    try { supabaseClient.functions.invoke("notificar-solicitacoes", { body: {} }).catch(function () {}); } catch (e) {}
     state.signupDone = true; state.signupDraft = null; render();
   }
 

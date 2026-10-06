@@ -46,3 +46,5 @@
 -- Empresa inativa (companies.active=false): app_private.my_company/my_role/ctx deixam de reconhecer seus usuários.
 -- Edge Function admin-usuarios v2: administrador da plataforma informa company_id e gerencia pessoas de qualquer empresa.
 -- app_private.teste_plataforma(): prova de isolamento da plataforma (desfaz tudo ao final).
+-- v1.7+: signup_requests.notified_at; Edge Function notificar-solicitacoes (pública, sem entrada do chamador):
+--   envia e-mail ao dono (Resend; segredos RESEND_API_KEY, opcionais NOTIFY_EMAIL e NOTIFY_FROM) e marca como avisadas.
