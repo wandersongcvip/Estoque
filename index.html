@@ -147,7 +147,9 @@
         "Em Admin, o administrador edita o nome e o logo da empresa e cadastra, edita ou exclui pessoas (nome, e-mail, perfil e senha). O e-mail de uma pessoa pode ser trocado quando precisar.",
         "As categorias agora podem ser renomeadas, mudar de cor e ser excluídas quando estiverem vazias.",
         "O link do painel para visualização agora tem um código secreto. O link antigo deixou de funcionar: copie o novo no botão \"Copiar link do painel\".",
-        "Senhas novas precisam ter pelo menos 8 caracteres."
+        "Senhas novas precisam ter pelo menos 8 caracteres.",
+        "Toda saída de estoque agora pede um motivo (consumo, perda ou quebra, vencimento, transferência, ajuste de inventário ou outro), que aparece no histórico e na planilha do período.",
+        "Em Relatórios, o novo bloco \"Estoque em uma data\" mostra quanto havia de cada item em qualquer dia do passado, com opção de baixar em Excel."
       ]
     },
     {
@@ -234,6 +236,7 @@
     brandMsg: null,
     publicError: "",
     userDraft: null,
+    asOf: { date: "", rows: null, error: "", busy: false },
     editingCategoryKey: null,
     confirmDeleteCategory: null,
     addingUser: false,
@@ -272,6 +275,8 @@
     backupBusy: false,
     lastBackupAt: null
   };
+
+  var MOTIVOS_SAIDA = ["Consumo/uso", "Perda ou quebra", "Vencimento/descarte", "Transferência entre filiais", "Ajuste de inventário", "Outro"];
 
   var DB_LIMIT_BYTES = 500 * 1024 * 1024; // limite do plano gratuito do Supabase (500 MB)
 
@@ -367,7 +372,7 @@
     return {
       id: row.id, type: row.type, itemId: row.item_id, itemName: row.item_name, categoryKey: row.category_key,
       unit: row.unit, qty: Number(row.qty) || 0, unitValue: Number(row.unit_value) || 0, totalValue: Number(row.total_value) || 0,
-      branch: row.branch, withdrawalName: row.withdrawal_name, note: row.note,
+      branch: row.branch, withdrawalName: row.withdrawal_name, reason: row.reason || "", note: row.note,
       occurredAt: row.occurred_at, registeredBy: row.registered_by
     };
   }
@@ -1214,6 +1219,8 @@
     } else {
       fields =
         '<div class="est-field"><label class="est-label">Quantidade</label><input class="est-input" type="number" min="0.01" step="0.01" id="mv-qty" placeholder="0"/></div>' +
+        '<div class="est-field"><label class="est-label">Motivo da saída</label><select class="est-select" id="mv-reason" style="width:100%">' +
+        MOTIVOS_SAIDA.map(function (m) { return '<option value="' + esc(m) + '">' + esc(m) + "</option>"; }).join("") + "</select></div>" +
         '<div class="est-field"><label class="est-label">Nomeação da retirada</label><input class="est-input" id="mv-name" placeholder="Ex.: Manutenção, nome de quem retirou…"/></div>' +
         '<div class="est-field"><label class="est-label">Filial</label><select class="est-select" id="mv-branch" style="width:100%">' +
         state.branches.map(function (b) { return '<option value="' + b.key + '">' + esc(b.label) + "</option>"; }).join("") +
@@ -1419,7 +1426,7 @@
     var isEntrada = mv.type === "entrada";
     var detail = isEntrada ?
       ("Valor unit. " + brl(mv.unitValue)) :
-      (esc((findBranchByKey(mv.branch) || {}).label || mv.branch) + " · " + esc(mv.withdrawalName || ""));
+      (esc((findBranchByKey(mv.branch) || {}).label || mv.branch) + " · " + esc(mv.withdrawalName || "") + (mv.reason ? " · motivo: " + esc(mv.reason) : ""));
     return '<div class="est-row">' +
       (isEntrada ? ICON.arrowIn : ICON.arrowOut) +
       '<div style="flex:1"><div class="est-row-name">' + esc(mv.itemName) + " <span style=\"font-weight:400;color:#8A8F98\">· " + esc(cat.label) + "</span></div>" +
@@ -1486,6 +1493,69 @@
       "</div>";
   }
 
+  function asOfDateEnd(dateStr) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr || "");
+    if (!m) return null;
+    var d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 23, 59, 59, 999);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  function asOfVisibleRows() {
+    return (state.asOf.rows || []).filter(function (r) { return r.qtd !== 0 || r.temHistorico; });
+  }
+
+  function asOfBlockHTML() {
+    var a = state.asOf;
+    var dateVal = a.date || todayKey();
+    var out = "";
+    if (a.error) out = '<div class="est-login-msg est-login-error">' + esc(a.error) + "</div>";
+    else if (a.rows) {
+      var rows = asOfVisibleRows();
+      var total = 0, neg = false;
+      var lines = rows.map(function (r) {
+        var v = r.qtd * r.custoMedio; total += v; if (r.qtd < 0) neg = true;
+        return '<div class="est-row"><div style="flex:1"><div class="est-row-name">' + esc(r.nome) + '</div><div class="est-row-meta">' + esc((catMeta(r.categoria) || {}).label || r.categoria) + "</div></div>" +
+          '<div class="est-num" style="min-width:110px;text-align:right">' + String(Math.round(r.qtd * 100) / 100).replace(".", ",") + " " + esc(r.unidade) + "</div>" +
+          '<div class="est-num" style="min-width:110px;text-align:right;font-weight:600">' + brl(v) + "</div></div>";
+      }).join("");
+      out = '<div class="est-row-meta" style="margin:8px 0">Posição em ' + esc(a.date.split("-").reverse().join("/")) + " (fim do dia): " + rows.length + " ite" + (rows.length === 1 ? "m" : "ns") +
+        ' · valor estimado ao custo médio atual: <b>' + brl(total) + "</b></div>" +
+        (neg ? '<div class="est-login-msg est-login-error">Algumas quantidades ficaram negativas: houve ajuste manual de item ou registros apagados antes dessa data.</div>' : "") +
+        (rows.length ? lines : '<div class="est-empty">Nenhum item com estoque ou movimentação até essa data.</div>') +
+        '<div style="margin-top:10px"><button class="est-btn" data-action="asof-download">' + ICON.download + " Baixar Excel desta data</button></div>";
+    }
+    return '<div class="est-form" style="margin-bottom:20px"><h2 class="est-h2" style="margin:0 0 4px">Estoque em uma data</h2>' +
+      '<div class="est-row-meta" style="margin-bottom:10px">Calculado a partir das entradas e saídas registradas. O valor usa o custo médio de hoje, então é uma estimativa.</div>' +
+      '<div class="est-toolbar" style="margin-bottom:0"><div class="est-field"><label class="est-label" for="asof-date">Data</label><input class="est-input" type="date" id="asof-date" value="' + esc(dateVal) + '" max="' + todayKey() + '"/></div>' +
+      '<button class="est-btn est-btn-primary" data-action="asof-run"' + (a.busy ? " disabled" : "") + '>' + (a.busy ? "Calculando…" : "Ver estoque nesta data") + "</button></div>" + out + "</div>";
+  }
+
+  async function runAsOf() {
+    var dateStr = (document.getElementById("asof-date") || {}).value || "";
+    var end = asOfDateEnd(dateStr);
+    state.asOf.date = dateStr;
+    if (!end) { state.asOf.error = "Escolha uma data válida."; state.asOf.rows = null; render(); return; }
+    state.asOf.busy = true; state.asOf.error = ""; render();
+    var res = await supabaseClient.rpc("estoque_em_data", { p_ate: end.toISOString() });
+    state.asOf.busy = false;
+    if (res.error) { state.asOf.error = "Não foi possível calcular: " + res.error.message; state.asOf.rows = null; render(); return; }
+    state.asOf.rows = (res.data || []).map(function (r) {
+      return { id: r.r_item_id, nome: r.r_nome, categoria: r.r_categoria, unidade: r.r_unidade, qtd: Number(r.r_qtd) || 0, custoMedio: Number(r.r_custo_medio) || 0, temHistorico: !!r.r_tem_historico };
+    });
+    render();
+  }
+
+  function downloadAsOf() {
+    if (typeof XLSX === "undefined" || !state.asOf.rows) return;
+    var rows = asOfVisibleRows().map(function (r) {
+      return { "Item": r.nome, "Categoria": (catMeta(r.categoria) || {}).label || r.categoria, "Unidade": r.unidade,
+        "Quantidade": r.qtd, "Custo médio atual (R$)": r.custoMedio, "Valor estimado (R$)": Math.round(r.qtd * r.custoMedio * 100) / 100 };
+    });
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.length ? rows : [{ "Item": "" }]), "Estoque na data");
+    try { XLSX.writeFile(wb, "estoque-em-" + state.asOf.date + ".xlsx"); } catch (e) {}
+  }
+
   function renderReportsPage() {
     var header = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">' +
       '<h2 class="est-h2" style="margin:0">Relatórios</h2>' +
@@ -1504,7 +1574,7 @@
       '<div class="est-field"><label class="est-label">Tipo</label><select class="est-select" id="rep-tipo" onchange="App.updateReport()"><option value="all">Todas</option><option value="entrada">Entradas</option><option value="saida">Saídas</option></select></div>' +
       "</div>";
 
-    return header + branchFormBlock + filterBar + '<div id="report-content">' + reportContentHTML(f) + "</div>";
+    return header + branchFormBlock + asOfBlockHTML() + filterBar + '<div id="report-content">' + reportContentHTML(f) + "</div>";
   }
 
   // ---------- log de auditoria ----------
@@ -1587,7 +1657,7 @@
         "Quantidade": Number(row.qty) || 0,
         "Valor unitário (R$)": Number(row.unit_value) || 0,
         "Valor total (R$)": Number(row.total_value) || 0,
-        "Filial": row.branch || "", "Retirada/motivo": row.withdrawal_name || "",
+        "Filial": row.branch || "", "Retirada": row.withdrawal_name || "", "Motivo": row.reason || "",
         "Registrado por": row.registered_by || ""
       };
     });
@@ -2201,6 +2271,10 @@
       state.importMsg = { type: "success", text: "Nota fiscal importada: " + nfRows.length + " ite" + (nfRows.length === 1 ? "m lançado" : "ns lançados") + " no estoque." };
       await refreshAllData();
       render();
+    } else if (action === "asof-run") {
+      await runAsOf();
+    } else if (action === "asof-download") {
+      downloadAsOf();
     } else if (action === "download-invoice") {
       var invRow = state.invoices.filter(function (x) { return x.id === id; })[0];
       if (invRow) downloadInvoiceXml(invRow);
@@ -2307,12 +2381,14 @@
       } else {
         var withdrawalName = ((document.getElementById("mv-name") || {}).value || "").trim();
         var branchKey = (document.getElementById("mv-branch") || {}).value || "";
-        if (!withdrawalName) { state.movementError = "Informe o nome/motivo da retirada."; render(); return; }
+        var reasonVal = (document.getElementById("mv-reason") || {}).value || "";
+        if (MOTIVOS_SAIDA.indexOf(reasonVal) < 0) { state.movementError = "Selecione o motivo da saída."; render(); return; }
+        if (!withdrawalName) { state.movementError = "Informe o nome de quem retirou ou o destino."; render(); return; }
         if (!findBranchByKey(branchKey)) { state.movementError = "Selecione a filial."; render(); return; }
         state.saving = true; render();
-        var saidaRes = await supabaseClient.rpc("registrar_saida", {
+        var saidaRes = await supabaseClient.rpc("registrar_saida_v2", {
           p_id: newMovementId, p_item_id: mvItem.id, p_qtd: qtyVal, p_nome_retirada: withdrawalName, p_filial: branchKey,
-          p_ocorrido_em: occurredAt.toISOString(), p_registrado_por: state.currentUser.username
+          p_ocorrido_em: occurredAt.toISOString(), p_registrado_por: state.currentUser.username, p_motivo: reasonVal
         });
         state.saving = false;
         if (saidaRes.error) { state.movementError = saidaRes.error.message || "Não foi possível registrar a saída."; render(); return; }
