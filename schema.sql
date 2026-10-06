@@ -34,3 +34,15 @@
 -- Schema app_private (não exposto pela API): my_company, my_role, ctx, set_company_id,
 --   criar_usuario, teste_isolamento, teste_fase2, teste_exclusoes (testes que desfazem tudo).
 -- Edge Function admin-usuarios: admin gerencia pessoas da própria empresa (listar/criar/atualizar/excluir).
+
+-- v1.7: administração da plataforma e solicitações de cadastro
+-- platform_admins(user_id pk, created_at)        -- contas sem empresa que administram a plataforma (sem acesso por API)
+-- signup_requests(id, created_at, full_name, email, phone, company_name, cnpj, city, segment, message,
+--                 status 'novo'|'em_contato'|'aprovado'|'recusado', notes, company_id, handled_at)  -- sem acesso por API
+-- solicitar_cadastro(...)  anon+authenticated: grava solicitação (valida, anti-duplicidade, limite por hora, campo isca)
+-- eh_plataforma(), plataforma_solicitacoes, plataforma_atualizar_solicitacao, plataforma_empresas,
+-- plataforma_criar_empresa (cria empresa + categorias/filial padrão), plataforma_set_ativa, plataforma_renomear_empresa
+--   → só authenticated e só quem está em platform_admins
+-- Empresa inativa (companies.active=false): app_private.my_company/my_role/ctx deixam de reconhecer seus usuários.
+-- Edge Function admin-usuarios v2: administrador da plataforma informa company_id e gerencia pessoas de qualquer empresa.
+-- app_private.teste_plataforma(): prova de isolamento da plataforma (desfaz tudo ao final).

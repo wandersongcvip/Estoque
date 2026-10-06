@@ -95,6 +95,12 @@
   .est-login-success { color:#16A34A; background:#F0FDF4; border:1px solid #BBF7D0; }
   .est-login-btn { width:100%; justify-content:center; padding:9px 13px; }
   .est-login-hint { font-size:11.5px; color:#9CA3AF; text-align:center; margin-top:16px; }
+  .est-auth-tabs { display:flex; gap:4px; background:#F3F4F6; border-radius:9px; padding:3px; margin-bottom:18px; }
+  .est-auth-tab { flex:1; border:none; background:transparent; padding:8px 10px; border-radius:7px; font:inherit; font-size:13px; font-weight:600; color:#6B7280; cursor:pointer; }
+  .est-auth-tab.active { background:#fff; color:#111827; box-shadow:0 1px 2px rgba(0,0,0,.08); }
+  .est-badge-n { display:inline-block; min-width:18px; padding:0 5px; border-radius:9px; background:#DC2626; color:#fff; font-size:11px; line-height:18px; text-align:center; }
+  .est-badge-n:empty { display:none; }
+  .est-card-box { background:#fff; border:1px solid #E5E7EB; border-radius:10px; padding:14px; margin-bottom:12px; }
   .est-role-badge { font-size:11.5px; font-weight:600; padding:3px 10px; border-radius:20px; background:#EEF2FF; color:#4F46E5; white-space:nowrap; }
   .est-user-chip { font-size:12.5px; color:#4B5563; white-space:nowrap; }
   .est-cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
@@ -147,6 +153,16 @@
   // após o login.
   var CHANGELOG_SEEN_KEY = "estoque-changelog-visto-v1";
   var CHANGELOG = [
+    {
+      version: "1.7",
+      date: "06/10/2026",
+      title: "Solicitar cadastro e administração de empresas",
+      items: [
+        "A tela de entrada agora tem duas opções: \"Entrar\" e \"Solicitar cadastro\", para novas empresas pedirem acesso ao STOCKAR.",
+        "Criada a Administração da plataforma, uma área separada das empresas, onde a equipe do STOCKAR recebe as solicitações, cria empresas e gerencia as pessoas de cada uma.",
+        "Empresas desativadas deixam de ter acesso até serem reativadas."
+      ]
+    },
     {
       version: "1.6",
       date: "06/10/2026",
@@ -243,6 +259,8 @@
     loginError: "",
     loginEmail: "",
     loginBusy: false,
+    authMode: "login", signupDraft: null, signupError: "", signupBusy: false, signupDone: false,
+    platform: null, plat: null,
     company: null,
     brandDraft: null,
     brandMsg: null,
@@ -585,12 +603,23 @@
   // Lê a sessão do login seguro (Supabase Auth) e carrega quem é a pessoa
   // e a empresa dela. Retorna false se não houver sessão válida.
   async function loadProfile() {
-    state.currentUser = null; state.company = null;
+    state.currentUser = null; state.company = null; state.platform = null;
     var s = await supabaseClient.auth.getSession();
     var session = s && s.data && s.data.session;
     if (!session) return false;
     var pRes = await supabaseClient.from("profiles").select("user_id,display_name,role,company_id").eq("user_id", session.user.id).maybeSingle();
-    if (pRes.error || !pRes.data) return false;
+    if (!pRes.data) {
+      // sem empresa: pode ser o administrador da plataforma
+      var pf = await supabaseClient.rpc("eh_plataforma");
+      if (pf && pf.data === true) {
+        state.platform = { id: session.user.id, email: session.user.email || "" };
+        if (!state.plat) platReset();
+        return true;
+      }
+      return false;
+    }
+    if (pRes.error) return false;
+    state.platform = null;
     var cRes = await supabaseClient.from("companies").select("id,name,logo_url,dashboard_token").eq("id", pRes.data.company_id).maybeSingle();
     state.currentUser = { id: session.user.id, username: pRes.data.display_name, email: session.user.email || "", role: pRes.data.role, companyId: pRes.data.company_id };
     var c = cRes && cRes.data;
@@ -640,8 +669,13 @@
     if (!ok) {
       try { await supabaseClient.auth.signOut(); } catch (e) {}
       state.loginBusy = false;
-      state.loginError = "Esta conta não está ligada a nenhuma empresa. Fale com o suporte do STOCKAR.";
+      state.loginError = "Esta conta não está ativa ou não está ligada a nenhuma empresa. Fale com o suporte do STOCKAR.";
       render();
+      return;
+    }
+    if (state.platform) {
+      platReset(); await loadPlatformData(); startPlatformPolling();
+      state.loginBusy = false; state.loginEmail = ""; render();
       return;
     }
     state.loading = true; state.activeTab = "dashboard"; state.globalError = "";
@@ -654,7 +688,9 @@
 
   function resetAfterLogout() {
     stopRealtime();
-    state.currentUser = null; state.company = null;
+    state.currentUser = null; state.company = null; state.platform = null; state.plat = null;
+    stopPlatformPolling();
+    state.authMode = "login"; state.signupDone = false;
     state.items = []; state.movements = []; state.categories = []; state.branches = [];
     state.users = []; state.auditLog = []; state.invoices = []; state.dbSizeBytes = null;
     state.activeTab = "dashboard";
@@ -667,9 +703,22 @@
     render();
   }
 
+  var platTimer = null;
+  function startPlatformPolling() {
+    stopPlatformPolling();
+    platTimer = setInterval(async function () {
+      if (!state.platform || !state.plat) return;
+      var ae = document.activeElement;
+      if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.tagName === "SELECT")) return;
+      if (state.plat.creating || state.plat.personForm || state.plat.busy) return;
+      await loadPlatformData(); render();
+    }, 30000);
+  }
+  function stopPlatformPolling() { if (platTimer) { clearInterval(platTimer); platTimer = null; } }
+
   async function doLogout() {
     try { await supabaseClient.auth.signOut(); } catch (e) {}
-    if (state.currentUser) resetAfterLogout();
+    if (state.currentUser || state.platform) resetAfterLogout();
   }
 
   async function doChangePassword() {
@@ -1300,16 +1349,353 @@
     return header + formBlock + "<div>" + rows + "</div>";
   }
 
+  // ---------- Solicitar cadastro (público) e Administração da plataforma ----------
+
+  var SEGMENTOS = ["Alimentação", "Saúde e clínicas", "Comércio", "Serviços", "Indústria", "Educação", "Outro"];
+
+  function genPass() {
+    var al = "abcdefghjkmnpqrstuvwxyz23456789", out = "";
+    var arr = new Uint32Array(12);
+    (window.crypto || window.msCrypto).getRandomValues(arr);
+    for (var i = 0; i < 12; i++) { out += al.charAt(arr[i] % al.length); if (i === 3 || i === 7) out += "-"; }
+    return out;
+  }
+
+  function phoneLink(phone) {
+    var d = String(phone || "").replace(/\D/g, "");
+    if (d.length <= 11) d = "55" + d;
+    return "https://wa.me/" + d;
+  }
+
+  function fmtDateTime(s) {
+    try { return new Date(s).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }); } catch (e) { return ""; }
+  }
+
+  function readSignupForm() {
+    function v(id) { return ((document.getElementById(id) || {}).value || "").trim(); }
+    return { nome: v("su-nome"), email: v("su-email"), telefone: v("su-tel"), empresa: v("su-empresa"), cnpj: v("su-cnpj"), cidade: v("su-cidade"), segmento: v("su-segmento"), mensagem: v("su-msg"), site: v("su-site") };
+  }
+
+  async function doSignupRequest() {
+    if (state.signupBusy) return;
+    var d = readSignupForm();
+    state.signupDraft = d; state.signupError = "";
+    if (d.nome.length < 3) { state.signupError = "Informe seu nome completo."; render(); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email)) { state.signupError = "Informe um e-mail válido."; render(); return; }
+    if (d.telefone.replace(/\D/g, "").length < 10) { state.signupError = "Informe um telefone com DDD."; render(); return; }
+    if (d.empresa.length < 2) { state.signupError = "Informe o nome da empresa."; render(); return; }
+    state.signupBusy = true; render();
+    var res = await supabaseClient.rpc("solicitar_cadastro", { p_nome: d.nome, p_email: d.email, p_telefone: d.telefone, p_empresa: d.empresa, p_cnpj: d.cnpj, p_cidade: d.cidade, p_segmento: d.segmento, p_mensagem: d.mensagem, p_site: d.site });
+    state.signupBusy = false;
+    if (res.error) { state.signupError = res.error.message || "Não foi possível enviar. Tente novamente."; render(); return; }
+    state.signupDone = true; state.signupDraft = null; render();
+  }
+
+  function renderSignupForm() {
+    var d = state.signupDraft || { nome: "", email: "", telefone: "", empresa: "", cnpj: "", cidade: "", segmento: "", mensagem: "" };
+    function f(label, id, val, type, ph, auto) {
+      return '<div class="est-login-field"><label class="est-label">' + label + '</label><input class="est-input" type="' + (type || "text") + '" id="' + id + '" value="' + esc(val) + '"' + (ph ? ' placeholder="' + esc(ph) + '"' : "") + (auto ? ' autocomplete="' + auto + '"' : "") + '/></div>';
+    }
+    var seg = '<option value="">Selecione</option>' + SEGMENTOS.map(function (s) { return '<option value="' + esc(s) + '"' + (d.segmento === s ? " selected" : "") + '>' + esc(s) + '</option>'; }).join("");
+    return (state.signupError ? '<div class="est-login-msg est-login-error">' + esc(state.signupError) + '</div>' : '') +
+      f("Nome completo *", "su-nome", d.nome, "text", "", "name") +
+      f("E-mail *", "su-email", d.email, "email", "voce@empresa.com", "email") +
+      f("Telefone / WhatsApp com DDD *", "su-tel", d.telefone, "tel", "(11) 91234-5678", "tel") +
+      f("Nome da empresa *", "su-empresa", d.empresa, "text", "", "organization") +
+      f("CNPJ (opcional)", "su-cnpj", d.cnpj, "text", "00.000.000/0000-00") +
+      f("Cidade / UF", "su-cidade", d.cidade, "text", "São Paulo / SP") +
+      '<div class="est-login-field"><label class="est-label">Segmento</label><select class="est-select" id="su-segmento" style="width:100%">' + seg + '</select></div>' +
+      '<div class="est-login-field"><label class="est-label">Conte um pouco sobre sua necessidade (opcional)</label><textarea class="est-input" id="su-msg" rows="3" style="resize:vertical">' + esc(d.mensagem || "") + '</textarea></div>' +
+      '<div style="position:absolute;left:-9999px;top:-9999px" aria-hidden="true"><input type="text" id="su-site" tabindex="-1" autocomplete="off"/></div>' +
+      '<button class="est-btn est-btn-primary est-login-btn" data-action="signup-submit"' + (state.signupBusy ? " disabled" : "") + '>' + (state.signupBusy ? "Enviando…" : "Enviar solicitação") + '</button>' +
+      '<div class="est-login-hint">Seus dados serão usados apenas para entrarmos em contato sobre o cadastro.</div>';
+  }
+
   function renderLogin() {
-    return '<div class="est-login-wrap"><div class="est-login-card">' +
+    var signup = state.authMode === "signup";
+    var tabs = '<div class="est-auth-tabs" role="tablist">' +
+      '<button type="button" role="tab" aria-selected="' + (!signup) + '" class="est-auth-tab' + (!signup ? " active" : "") + '" data-action="auth-mode" data-id="login">Entrar</button>' +
+      '<button type="button" role="tab" aria-selected="' + signup + '" class="est-auth-tab' + (signup ? " active" : "") + '" data-action="auth-mode" data-id="signup">Solicitar cadastro</button></div>';
+    var body;
+    if (signup && state.signupDone) {
+      body = '<div class="est-login-msg est-login-success">Recebemos sua solicitação! Nossa equipe vai entrar em contato pelo e-mail ou telefone informado.</div>' +
+        '<button class="est-btn est-login-btn" data-action="auth-mode" data-id="login">Voltar para o login</button>';
+    } else if (signup) {
+      body = renderSignupForm();
+    } else {
+      body = (state.loginError ? '<div class="est-login-msg est-login-error">' + esc(state.loginError) + '</div>' : '') +
+        '<div class="est-login-field"><label class="est-label">E-mail</label><input class="est-input" type="email" id="login-user" autocomplete="username" value="' + esc(state.loginEmail) + '"/></div>' +
+        '<div class="est-login-field"><label class="est-label">Senha</label><input class="est-input" type="password" id="login-pass" autocomplete="current-password"/></div>' +
+        '<button class="est-btn est-btn-primary est-login-btn" data-action="login-submit"' + (state.loginBusy ? " disabled" : "") + '>' + (state.loginBusy ? "Entrando…" : "Entrar") + '</button>';
+    }
+    return '<div class="est-login-wrap"><div class="est-login-card"' + (signup ? ' style="max-width:460px"' : "") + '>' +
       '<div class="est-login-logo">' + LOGO_SVG + '</div>' +
       '<div class="est-login-title">Controle de estoque</div>' +
-      '<div class="est-login-sub">Entre com seu e-mail e senha</div>' +
-      (state.loginError ? '<div class="est-login-msg est-login-error">' + esc(state.loginError) + '</div>' : '') +
-      '<div class="est-login-field"><label class="est-label">E-mail</label><input class="est-input" type="email" id="login-user" autocomplete="username" value="' + esc(state.loginEmail) + '"/></div>' +
-      '<div class="est-login-field"><label class="est-label">Senha</label><input class="est-input" type="password" id="login-pass" autocomplete="current-password"/></div>' +
-      '<button class="est-btn est-btn-primary est-login-btn" data-action="login-submit"' + (state.loginBusy ? " disabled" : "") + '>' + (state.loginBusy ? "Entrando…" : "Entrar") + '</button>' +
+      '<div class="est-login-sub">' + (signup ? "Preencha para solicitar o acesso da sua empresa" : "Entre com seu e-mail e senha") + '</div>' +
+      tabs + body + '</div></div>';
+  }
+
+  // ----- área do administrador da plataforma -----
+
+  var PLAT_STATUS = { novo: "Nova", em_contato: "Em contato", aprovado: "Aprovada", recusado: "Recusada" };
+
+  function platReset() {
+    state.plat = { tab: "solicitacoes", filter: "novo", requests: [], companies: [], error: "", creating: null, formError: "", busy: false, created: null,
+      openCompany: null, users: [], usersError: "", personForm: null, confirm: null, renaming: null, msg: "" };
+  }
+
+  async function platCall(fn, args) {
+    var r = await supabaseClient.rpc(fn, args || {});
+    if (r.error) return { ok: false, erro: r.error.message || "Não foi possível concluir." };
+    return { ok: true, data: r.data };
+  }
+
+  async function loadPlatformData() {
+    var a = await platCall("plataforma_solicitacoes");
+    var b = await platCall("plataforma_empresas");
+    if (!a.ok || !b.ok) { state.plat.error = "Não foi possível carregar: " + (a.erro || b.erro); return; }
+    state.plat.error = "";
+    state.plat.requests = a.data || [];
+    state.plat.companies = b.data || [];
+    state.lastUpdated = new Date();
+  }
+
+  async function loadPlatUsers(companyId) {
+    var r = await callAdminUsers({ acao: "listar", company_id: companyId });
+    state.plat.usersError = r.ok ? "" : r.erro;
+    state.plat.users = (r.ok && r.data && r.data.usuarios) ? r.data.usuarios : [];
+  }
+
+  function platTabsHTML() {
+    var novas = state.plat.requests.filter(function (r) { return r.status === "novo"; }).length;
+    function t(id, label, badge) {
+      return '<button type="button" class="est-auth-tab' + (state.plat.tab === id ? " active" : "") + '" data-action="plat-tab" data-id="' + id + '">' + label + (badge ? ' <span class="est-badge-n">' + badge + '</span>' : "") + '</button>';
+    }
+    return '<div class="est-auth-tabs" style="max-width:420px">' + t("solicitacoes", "Solicitações", novas) + t("empresas", "Empresas", 0) + '</div>';
+  }
+
+  function requestCardHTML(r) {
+    var cnpj = r.cnpj ? ' · CNPJ ' + esc(r.cnpj) : "";
+    var opts = Object.keys(PLAT_STATUS).map(function (k) { return '<option value="' + k + '"' + (r.status === k ? " selected" : "") + '>' + PLAT_STATUS[k] + '</option>'; }).join("");
+    return '<div class="est-card-box">' +
+      '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:flex-start">' +
+      '<div><div class="est-row-name">' + esc(r.company_name) + '</div><div class="est-row-meta">' + esc(r.full_name) + ' · recebida em ' + esc(fmtDateTime(r.created_at)) + '</div></div>' +
+      '<span class="est-role-badge">' + esc(PLAT_STATUS[r.status] || r.status) + '</span></div>' +
+      '<div class="est-row-meta" style="margin-top:8px;line-height:1.7">' +
+      '<a href="mailto:' + esc(r.email) + '">' + esc(r.email) + '</a> · <a href="' + esc(phoneLink(r.phone)) + '" target="_blank" rel="noopener">' + esc(r.phone) + ' (WhatsApp)</a>' + cnpj +
+      (r.city ? '<br>' + esc(r.city) : "") + (r.segment ? (r.city ? " · " : "<br>") + esc(r.segment) : "") + '</div>' +
+      (r.message ? '<div style="margin-top:8px;font-size:13px;white-space:pre-wrap;background:#F9FAFB;border-radius:8px;padding:8px 10px">' + esc(r.message) + '</div>' : "") +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center">' +
+      '<select class="est-select" id="rq-status-' + r.id + '">' + opts + '</select>' +
+      '<input class="est-input" style="flex:1;min-width:180px" id="rq-notes-' + r.id + '" placeholder="Anotações internas" value="' + esc(r.notes || "") + '"/>' +
+      '<button class="est-btn" data-action="plat-save-request" data-id="' + r.id + '">' + ICON.check + ' Salvar</button>' +
+      (r.company_id ? '<span class="est-row-meta">Empresa já criada</span>' : '<button class="est-btn est-btn-primary" data-action="plat-new-company" data-id="' + r.id + '">' + ICON.plus + ' Criar empresa</button>') +
       '</div></div>';
+  }
+
+  function createdBoxHTML() {
+    var c = state.plat.created;
+    if (!c) return "";
+    return '<div class="est-login-msg est-login-success" style="font-size:13px">' +
+      '<strong>Empresa criada!</strong> Envie estes dados de acesso ao cliente (a senha não será mostrada de novo):' +
+      '<div style="margin:8px 0;font-family:monospace;white-space:pre-wrap">Empresa: ' + esc(c.empresa) + '\nEndereço: ' + esc(c.url) + '\nE-mail: ' + esc(c.email) + '\nSenha provisória: ' + esc(c.senha) + '</div>' +
+      '<button class="est-btn" data-action="plat-copy-created">' + ICON.copy + (state.plat.copiedCreated ? " Copiado!" : " Copiar dados") + '</button> ' +
+      '<button class="est-btn est-btn-ghost" data-action="plat-dismiss-created">Fechar</button></div>';
+  }
+
+  function companyFormHTML() {
+    var d = state.plat.creating;
+    if (!d) return "";
+    return '<div class="est-form" style="margin-bottom:16px"><div style="font-weight:700;margin-bottom:8px">Nova empresa</div>' +
+      (state.plat.formError ? '<div class="est-login-msg est-login-error">' + esc(state.plat.formError) + '</div>' : '') +
+      '<div class="est-form-grid">' +
+      '<div class="est-field"><label class="est-label">Nome da empresa</label><input class="est-input" id="nc-empresa" value="' + esc(d.empresa) + '"/></div>' +
+      '<div class="est-field"><label class="est-label">Nome do administrador</label><input class="est-input" id="nc-nome" value="' + esc(d.nome) + '"/></div>' +
+      '<div class="est-field"><label class="est-label">E-mail do administrador (é o login)</label><input class="est-input" type="email" id="nc-email" value="' + esc(d.email) + '"/></div>' +
+      '<div class="est-field"><label class="est-label">Senha provisória</label><div style="display:flex;gap:6px"><input class="est-input" id="nc-senha" value="' + esc(d.senha) + '" autocomplete="off"/><button type="button" class="est-btn" data-action="plat-gen-pass">Gerar</button></div></div>' +
+      '</div><div style="display:flex;gap:8px"><button class="est-btn est-btn-primary" data-action="plat-create-company"' + (state.plat.busy ? " disabled" : "") + '>' + ICON.check + (state.plat.busy ? " Criando…" : " Criar empresa") + '</button>' +
+      '<button class="est-btn" data-action="plat-cancel-company">' + ICON.x + ' Cancelar</button></div></div>';
+  }
+
+  function platRequestsHTML() {
+    var f = state.plat.filter;
+    var chips = [["novo", "Novas"], ["em_contato", "Em contato"], ["aprovado", "Aprovadas"], ["recusado", "Recusadas"], ["todas", "Todas"]].map(function (c) {
+      return '<button type="button" class="est-btn' + (f === c[0] ? " est-btn-primary" : "") + '" data-action="plat-filter" data-id="' + c[0] + '">' + c[1] + '</button>';
+    }).join(" ");
+    var list = state.plat.requests.filter(function (r) { return f === "todas" || r.status === f; });
+    return '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">' + chips + '</div>' +
+      (list.length ? list.map(requestCardHTML).join("") : '<div class="est-empty">Nenhuma solicitação nesta lista.</div>');
+  }
+
+  function personFormHTML() {
+    var p = state.plat.personForm;
+    if (!p) return "";
+    return '<div class="est-form" style="margin:8px 0">' +
+      (state.plat.formError ? '<div class="est-login-msg est-login-error">' + esc(state.plat.formError) + '</div>' : '') +
+      '<div class="est-form-grid">' +
+      '<div class="est-field"><label class="est-label">Nome</label><input class="est-input" id="pf-nome" value="' + esc(p.nome) + '"/></div>' +
+      '<div class="est-field"><label class="est-label">E-mail (login)</label><input class="est-input" type="email" id="pf-email" value="' + esc(p.email) + '"/></div>' +
+      '<div class="est-field"><label class="est-label">Perfil</label><select class="est-select" id="pf-role" style="width:100%"><option value="editor"' + (p.role === "editor" ? " selected" : "") + '>Editor</option><option value="admin"' + (p.role === "admin" ? " selected" : "") + '>Administrador</option></select></div>' +
+      '<div class="est-field"><label class="est-label">' + (p.id ? "Nova senha (opcional)" : "Senha provisória") + '</label><div style="display:flex;gap:6px"><input class="est-input" id="pf-senha" value="' + esc(p.senha) + '" autocomplete="off"/><button type="button" class="est-btn" data-action="plat-gen-pass-person">Gerar</button></div></div>' +
+      '</div><div style="display:flex;gap:8px"><button class="est-btn est-btn-primary" data-action="plat-save-person" data-id="' + esc(p.id || "") + '">' + ICON.check + ' Salvar</button>' +
+      '<button class="est-btn" data-action="plat-cancel-person">' + ICON.x + ' Cancelar</button></div></div>';
+  }
+
+  function companyRowHTML(c) {
+    var open = state.plat.openCompany === c.id;
+    var renaming = state.plat.renaming === c.id;
+    var head = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+      '<div style="flex:1;min-width:180px">' +
+      (renaming
+        ? '<div style="display:flex;gap:6px"><input class="est-input" id="rn-nome" value="' + esc(c.name) + '"/><button class="est-btn est-btn-primary" data-action="plat-save-rename" data-id="' + c.id + '">' + ICON.check + '</button><button class="est-btn" data-action="plat-cancel-rename">' + ICON.x + '</button></div>'
+        : '<div class="est-row-name">' + esc(c.name) + (c.active ? "" : ' <span class="est-role-badge" style="background:#FEF2F2;color:#DC2626">Desativada</span>') + '</div>') +
+      '<div class="est-row-meta">' + c.usuarios + ' pessoa(s) · ' + c.itens + ' item(ns) · ' + c.movimentos + ' movimento(s) · criada em ' + esc(new Date(c.created_at).toLocaleDateString("pt-BR")) + '</div></div>' +
+      '<button class="est-btn" data-action="plat-open-company" data-id="' + c.id + '">' + ICON.user + (open ? " Fechar pessoas" : " Pessoas") + '</button>' +
+      '<button class="est-btn est-btn-ghost" data-action="plat-rename" data-id="' + c.id + '" title="Renomear">' + ICON.edit + '</button>' +
+      (state.plat.confirm === c.id
+        ? '<button class="est-btn" style="color:#DC2626" data-action="plat-toggle-active" data-id="' + c.id + '">Confirmar ' + (c.active ? "desativar" : "reativar") + '</button><button class="est-btn" data-action="plat-cancel-confirm">Cancelar</button>'
+        : '<button class="est-btn" data-action="plat-ask-toggle" data-id="' + c.id + '">' + (c.active ? "Desativar" : "Reativar") + '</button>') +
+      '</div>';
+    var body = "";
+    if (open) {
+      var rows = state.plat.users.map(function (u) {
+        return '<div class="est-row"><div style="flex:1"><div class="est-row-name">' + esc(u.nome) + '</div><div class="est-row-meta">' + esc(u.email || "") + '</div></div>' +
+          '<span class="est-role-badge">' + (u.role === "admin" ? "Administrador" : "Editor") + '</span>' +
+          '<button class="est-btn est-btn-ghost" data-action="plat-edit-person" data-id="' + u.user_id + '" title="Editar">' + ICON.edit + '</button>' +
+          (state.plat.confirm === "u:" + u.user_id
+            ? '<button class="est-btn" style="color:#DC2626" data-action="plat-del-person" data-id="' + u.user_id + '">Confirmar exclusão</button>'
+            : '<button class="est-btn est-btn-ghost" data-action="plat-ask-del-person" data-id="' + u.user_id + '" title="Excluir">' + ICON.trash + '</button>') + '</div>';
+      }).join("");
+      body = '<div style="margin-top:10px;border-top:1px solid #E5E7EB;padding-top:10px">' +
+        (state.plat.usersError ? '<div class="est-login-msg est-login-error">' + esc(state.plat.usersError) + '</div>' : '') +
+        (rows || '<div class="est-empty">Nenhuma pessoa cadastrada.</div>') + personFormHTML() +
+        (state.plat.personForm ? "" : '<button class="est-btn est-btn-primary" style="margin-top:8px" data-action="plat-add-person">' + ICON.plus + ' Nova pessoa</button>') + '</div>';
+    }
+    return '<div class="est-card-box">' + head + body + '</div>';
+  }
+
+  function platCompaniesHTML() {
+    return '<div style="display:flex;justify-content:flex-end;margin-bottom:12px">' +
+      (!state.plat.creating ? '<button class="est-btn est-btn-primary" data-action="plat-new-company">' + ICON.plus + ' Nova empresa</button>' : "") + '</div>' +
+      companyFormHTML() +
+      (state.plat.companies.length ? state.plat.companies.map(companyRowHTML).join("") : '<div class="est-empty">Nenhuma empresa.</div>');
+  }
+
+  function renderPlatform() {
+    var p = state.plat;
+    return '<div class="est-wrap"><div style="max-width:920px;margin:0 auto;padding:20px">' +
+      '<div class="est-header"><div class="est-brand"><div class="est-logo-mark">' + LOGO_SVG + '</div><div class="est-company"><div class="est-company-name">Administração da plataforma</div></div></div>' +
+      '<div class="est-header-right-col"><div class="est-header-row"><span class="est-user-chip">' + ICON.user + " " + esc(state.platform.email) + '</span>' +
+      '<button class="est-btn" data-action="plat-refresh">' + ICON.refresh + ' Atualizar</button>' +
+      '<button class="est-btn" data-action="logout">' + ICON.logout + ' Sair</button></div></div></div>' +
+      (p.error ? '<div class="est-login-msg est-login-error">' + esc(p.error) + '</div>' : '') +
+      (p.msg ? '<div class="est-login-msg est-login-success">' + esc(p.msg) + '</div>' : '') +
+      createdBoxHTML() + platTabsHTML() +
+      (p.tab === "empresas" ? platCompaniesHTML() : platRequestsHTML()) + '</div></div>';
+  }
+
+  async function platAction(action, id) {
+    var p = state.plat;
+    function val(i) { return ((document.getElementById(i) || {}).value || "").trim(); }
+    p.msg = "";
+    if (action === "plat-tab") { p.tab = id; p.formError = ""; render(); }
+    else if (action === "plat-filter") { p.filter = id; render(); }
+    else if (action === "plat-refresh") { await loadPlatformData(); render(); }
+    else if (action === "plat-save-request") {
+      var r = await platCall("plataforma_atualizar_solicitacao", { p_id: id, p_status: val("rq-status-" + id), p_notas: (document.getElementById("rq-notes-" + id) || {}).value || "" });
+      if (!r.ok) p.error = r.erro; else { p.error = ""; await loadPlatformData(); p.msg = "Solicitação atualizada."; }
+      render();
+    }
+    else if (action === "plat-new-company") {
+      var rq = id ? p.requests.filter(function (x) { return x.id === id; })[0] : null;
+      p.creating = { solicitacao: rq ? rq.id : null, empresa: rq ? rq.company_name : "", nome: rq ? rq.full_name : "", email: rq ? rq.email : "", senha: genPass() };
+      p.formError = ""; p.tab = "empresas"; render();
+    }
+    else if (action === "plat-cancel-company") { p.creating = null; p.formError = ""; render(); }
+    else if (action === "plat-gen-pass") {
+      p.creating = { solicitacao: p.creating.solicitacao, empresa: val("nc-empresa"), nome: val("nc-nome"), email: val("nc-email"), senha: genPass() }; render();
+    }
+    else if (action === "plat-create-company") {
+      if (p.busy) return;
+      var d = { solicitacao: p.creating.solicitacao, empresa: val("nc-empresa"), nome: val("nc-nome"), email: val("nc-email"), senha: val("nc-senha") };
+      p.creating = d; p.formError = "";
+      if (d.empresa.length < 2) { p.formError = "Informe o nome da empresa."; render(); return; }
+      if (!d.nome) { p.formError = "Informe o nome do administrador."; render(); return; }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email)) { p.formError = "Informe um e-mail válido."; render(); return; }
+      if (d.senha.length < 8) { p.formError = "A senha precisa ter ao menos 8 caracteres."; render(); return; }
+      p.busy = true; render();
+      var c1 = await platCall("plataforma_criar_empresa", { p_nome: d.empresa, p_solicitacao: d.solicitacao });
+      if (!c1.ok) { p.busy = false; p.formError = c1.erro; render(); return; }
+      var c2 = await callAdminUsers({ acao: "criar", company_id: c1.data, nome: d.nome, email: d.email, role: "admin", senha: d.senha });
+      p.busy = false;
+      await loadPlatformData();
+      if (!c2.ok) {
+        p.creating = null; p.openCompany = c1.data; await loadPlatUsers(c1.data);
+        p.error = "A empresa foi criada, mas o administrador não: " + c2.erro + " Adicione-o em \"Pessoas\".";
+        render(); return;
+      }
+      p.error = ""; p.creating = null; p.copiedCreated = false;
+      p.created = { empresa: d.empresa, url: window.location.origin + window.location.pathname, email: d.email, senha: d.senha };
+      render();
+    }
+    else if (action === "plat-dismiss-created") { p.created = null; render(); }
+    else if (action === "plat-copy-created") {
+      var c = p.created; if (!c) return;
+      var txt = "STOCKAR — acesso da empresa " + c.empresa + "\nEndereço: " + c.url + "\nE-mail: " + c.email + "\nSenha provisória: " + c.senha + "\n(Troque a senha no primeiro acesso.)";
+      try { await navigator.clipboard.writeText(txt); p.copiedCreated = true; } catch (e) { p.copiedCreated = false; }
+      render();
+    }
+    else if (action === "plat-ask-toggle") { p.confirm = id; render(); }
+    else if (action === "plat-cancel-confirm") { p.confirm = null; render(); }
+    else if (action === "plat-toggle-active") {
+      var comp = p.companies.filter(function (x) { return x.id === id; })[0];
+      var t = await platCall("plataforma_set_ativa", { p_id: id, p_ativa: comp ? !comp.active : true });
+      p.confirm = null; if (!t.ok) p.error = t.erro; else { p.error = ""; await loadPlatformData(); }
+      render();
+    }
+    else if (action === "plat-rename") { p.renaming = id; render(); }
+    else if (action === "plat-cancel-rename") { p.renaming = null; render(); }
+    else if (action === "plat-save-rename") {
+      var rn = await platCall("plataforma_renomear_empresa", { p_id: id, p_nome: val("rn-nome") });
+      if (!rn.ok) p.error = rn.erro; else { p.error = ""; p.renaming = null; await loadPlatformData(); }
+      render();
+    }
+    else if (action === "plat-open-company") {
+      if (p.openCompany === id) { p.openCompany = null; p.personForm = null; render(); return; }
+      p.openCompany = id; p.personForm = null; p.users = []; p.usersError = ""; p.confirm = null; render();
+      await loadPlatUsers(id); render();
+    }
+    else if (action === "plat-add-person") { p.personForm = { id: "", nome: "", email: "", role: "editor", senha: genPass() }; p.formError = ""; render(); }
+    else if (action === "plat-edit-person") {
+      var u = p.users.filter(function (x) { return x.user_id === id; })[0]; if (!u) return;
+      p.personForm = { id: id, nome: u.nome, email: u.email || "", role: u.role, senha: "" }; p.formError = ""; render();
+    }
+    else if (action === "plat-cancel-person") { p.personForm = null; p.formError = ""; render(); }
+    else if (action === "plat-gen-pass-person") {
+      p.personForm = { id: p.personForm.id, nome: val("pf-nome"), email: val("pf-email"), role: val("pf-role") || "editor", senha: genPass() }; render();
+    }
+    else if (action === "plat-save-person") {
+      var f = { id: id || "", nome: val("pf-nome"), email: val("pf-email"), role: val("pf-role") || "editor", senha: val("pf-senha") };
+      p.personForm = f; p.formError = "";
+      if (!f.nome) { p.formError = "Informe o nome."; render(); return; }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email)) { p.formError = "Informe um e-mail válido."; render(); return; }
+      if (f.senha && f.senha.length < 8) { p.formError = "A senha precisa ter ao menos 8 caracteres."; render(); return; }
+      if (!f.id && !f.senha) { p.formError = "Informe uma senha provisória."; render(); return; }
+      var body = f.id ? { acao: "atualizar", company_id: p.openCompany, user_id: f.id, nome: f.nome, email: f.email, role: f.role, senha: f.senha }
+                      : { acao: "criar", company_id: p.openCompany, nome: f.nome, email: f.email, role: f.role, senha: f.senha };
+      var sv = await callAdminUsers(body);
+      if (!sv.ok) { p.formError = sv.erro; render(); return; }
+      p.personForm = null; await loadPlatUsers(p.openCompany); await loadPlatformData();
+      p.msg = f.id ? "Pessoa atualizada." : "Pessoa criada. Envie o e-mail e a senha provisória: " + f.email + " / " + f.senha;
+      render();
+    }
+    else if (action === "plat-ask-del-person") { p.confirm = "u:" + id; render(); }
+    else if (action === "plat-del-person") {
+      var dl = await callAdminUsers({ acao: "excluir", company_id: p.openCompany, user_id: id });
+      p.confirm = null;
+      if (!dl.ok) p.usersError = dl.erro; else { await loadPlatUsers(p.openCompany); await loadPlatformData(); }
+      render();
+    }
   }
 
   function userFormHTML(initial) {
@@ -1914,6 +2300,10 @@
       root.innerHTML = renderSetupNeeded();
       return;
     }
+    if (!forceView && state.platform && state.plat) {
+      root.innerHTML = renderPlatform();
+      return;
+    }
     if (!forceView && !state.currentUser) {
       root.innerHTML = renderLogin();
       return;
@@ -2060,6 +2450,13 @@
 
     if (action === "login-submit") {
       doLogin();
+    } else if (action === "auth-mode") {
+      state.authMode = id === "signup" ? "signup" : "login"; state.signupError = ""; state.loginError = ""; if (id !== "signup") state.signupDone = false; render();
+    } else if (action === "signup-submit") {
+      doSignupRequest();
+    } else if (action.indexOf("plat-") === 0) {
+      if (!state.platform) return;
+      platAction(action, id);
     } else if (action === "logout") {
       doLogout();
     } else if (action === "save-password") {
@@ -2647,11 +3044,13 @@
     }
 
     supabaseClient.auth.onAuthStateChange(function (ev) {
-      if (ev === "SIGNED_OUT" && state.currentUser) resetAfterLogout();
+      if (ev === "SIGNED_OUT" && (state.currentUser || state.platform)) resetAfterLogout();
     });
 
     var ok = await loadProfile();
-    if (ok) {
+    if (ok && state.platform) {
+      platReset(); await loadPlatformData(); startPlatformPolling();
+    } else if (ok) {
       await refreshAllData();
       checkChangelog();
       startRealtime();
