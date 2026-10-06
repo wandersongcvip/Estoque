@@ -12,7 +12,7 @@
   .est-num { font-family:'Manrope', ui-sans-serif, system-ui, sans-serif; font-variant-numeric: tabular-nums; font-weight:700; }
   .est-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:18px 22px; border-bottom:1px solid #E5E7EB; background:#FFFFFF; flex-wrap:wrap; }
   .est-brand { display:flex; align-items:center; gap:10px; }
-  .est-logo-mark { height:32px; display:flex; align-items:center; flex-shrink:0; }
+  .est-logo-mark { height:38px; display:flex; align-items:center; flex-shrink:0; }
   .est-title { font-size:13px; font-weight:600; color:#6B7280; letter-spacing:-0.01em; }
   .est-sub { font-size:12px; color:#6B7280; margin-top:1px; }
   .est-btn { display:inline-flex; align-items:center; gap:6px; padding:8px 13px; border-radius:8px; font-size:13px; font-weight:500; border:1px solid #E5E7EB; background:#fff; color:#1E2430; cursor:pointer; transition:background .15s ease, border-color .15s ease; white-space:nowrap; font-family:inherit; }
@@ -76,7 +76,7 @@
   .ic { display:inline-flex; }
   .est-login-wrap { min-height:100vh; display:flex; align-items:center; justify-content:center; background:#F6F7F9; padding:20px; }
   .est-login-card { background:#fff; border:1px solid #E5E7EB; border-radius:12px; padding:32px 28px; width:100%; max-width:360px; box-shadow:0 1px 3px rgba(0,0,0,.06); }
-  .est-login-logo { height:36px; margin-bottom:18px; display:flex; justify-content:center; }
+  .est-login-logo { height:48px; margin-bottom:18px; display:flex; justify-content:center; }
   .est-login-title { font-size:16px; font-weight:800; text-align:center; margin-bottom:4px; }
   .est-login-sub { font-size:12.5px; color:#6B7280; text-align:center; margin-bottom:20px; }
   .est-login-field { margin-bottom:12px; }
@@ -138,6 +138,14 @@
   var CHANGELOG_SEEN_KEY = "estoque-changelog-visto-v1";
   var CHANGELOG = [
     {
+      version: "1.4",
+      date: "06/10/2026",
+      title: "Nova logo do STOCKAR",
+      items: [
+        "O logotipo ganhou uma caixa em 3D com três tons de verde, quinas amarelas e as letras S, T e K nas faces do cubo."
+      ]
+    },
+    {
       version: "1.3",
       date: "06/10/2026",
       title: "Nasce o STOCKAR",
@@ -158,7 +166,7 @@
     }
   ];
 
-  var LOGO_SVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 204 40\" role=\"img\" aria-label=\"STOCKAR\" style=\"height:100%;width:auto;display:block\"><polygon points=\"20,3 36,12 20,21 4,12\" fill=\"#44882B\"/><polygon points=\"4,12 20,21 20,38 4,29\" fill=\"#294534\"/><polygon points=\"36,12 36,29 20,38 20,21\" fill=\"#3A6B2A\"/><text x=\"48\" y=\"29\" font-family=\"Manrope, Arial, sans-serif\" font-size=\"27\" font-weight=\"800\" fill=\"#294534\" textLength=\"154\" lengthAdjust=\"spacing\">STOCKAR</text></svg>";
+  var LOGO_SVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"30 20 520 160\" role=\"img\" aria-label=\"STOCKAR\" style=\"height:100%;width:auto;display:block\"><defs><linearGradient id=\"lgt\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"1\"><stop offset=\"0\" stop-color=\"#9ADB5E\"/><stop offset=\"1\" stop-color=\"#6DB33F\"/></linearGradient><linearGradient id=\"lgl\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\"><stop offset=\"0\" stop-color=\"#2E6B3A\"/><stop offset=\"1\" stop-color=\"#1B4527\"/></linearGradient><linearGradient id=\"lgr\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\"><stop offset=\"0\" stop-color=\"#4F9F3F\"/><stop offset=\"1\" stop-color=\"#33782F\"/></linearGradient></defs><polygon points=\"100,28 160.6,63 100,98 39.4,63\" fill=\"url(#lgt)\"/><polygon points=\"39.4,63 100,98 100,168 39.4,133\" fill=\"url(#lgl)\"/><polygon points=\"160.6,63 160.6,133 100,168 100,98\" fill=\"url(#lgr)\"/><g transform=\"translate(84 37) scale(0.82)\"><path d=\"M34 12 C30 3 8 2 7 16 C6 30 36 28 34 44 C33 58 10 58 5 46\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"10\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g><g transform=\"matrix(0.866 0.5 0 1 39.4 63)\"><path d=\"M16 20 H54 M35 20 V56\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"10\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g><g transform=\"matrix(0.866 -0.5 0 1 100 98)\"><path d=\"M20 14 V56 M52 14 L22 36 M30 31 L54 56\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"10\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></g><g fill=\"none\" stroke=\"#FFC81E\" stroke-width=\"5\" stroke-linejoin=\"round\" stroke-linecap=\"round\"><polygon points=\"100,28 160.6,63 160.6,133 100,168 39.4,133 39.4,63\"/><polyline points=\"39.4,63 100,98 160.6,63\"/><line x1=\"100\" y1=\"98\" x2=\"100\" y2=\"168\"/></g><text x=\"182\" y=\"125\" font-family=\"Manrope, Arial, sans-serif\" font-size=\"72\" font-weight=\"800\" fill=\"#1F4D2B\" textLength=\"340\" lengthAdjust=\"spacing\">STOCKAR</text></svg>";
 
   var ICON = {
     plus: '<svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
