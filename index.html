@@ -154,6 +154,18 @@
   var CHANGELOG_SEEN_KEY = "estoque-changelog-visto-v1";
   var CHANGELOG = [
     {
+      version: "1.8",
+      date: "15/10/2026",
+      title: "Planilha padrão da Leaf",
+      items: [
+        "A Leaf agora tem uma planilha padrão: o mesmo arquivo serve para enviar dados ao app (Importar Excel) e para baixar (Exportar Excel).",
+        "Antes de gravar, o app confere a planilha e mostra o que vai acontecer; se houver erro, nada é gravado e ele diz a linha e o motivo.",
+        "Nova coluna \"Saldo Inicial\" no cadastro de produtos, para o saldo de antes das movimentações.",
+        "Novos campos só para a Leaf: Setor, Colaborador, Centro de custo, Documento, Fornecedor, Localização, Ativo e Observações.",
+        "Setores e responsáveis da Leaf podem ser editados na área de administração (Listas da empresa)."
+      ]
+    },
+    {
       version: "1.7",
       date: "06/10/2026",
       title: "Solicitar cadastro e administração de empresas",
@@ -280,6 +292,7 @@
     addingCategory: false,
     categoryFormError: "",
     importMsg: null,
+    leafPreview: null,
     movements: [],
     movementItemId: null,
     movementType: null,
@@ -416,7 +429,8 @@
       id: row.id, type: row.type, itemId: row.item_id, itemName: row.item_name, categoryKey: row.category_key,
       unit: row.unit, qty: Number(row.qty) || 0, unitValue: Number(row.unit_value) || 0, totalValue: Number(row.total_value) || 0,
       branch: row.branch, withdrawalName: row.withdrawal_name, reason: row.reason || "", note: row.note,
-      occurredAt: row.occurred_at, registeredBy: row.registered_by
+      occurredAt: row.occurred_at, registeredBy: row.registered_by,
+      sector: row.sector || "", collaborator: row.collaborator || "", costCenter: row.cost_center || "", document: row.document || ""
     };
   }
 
@@ -525,7 +539,8 @@
     return {
       id: row.id, category: row.category, name: row.name, unit: row.unit,
       qty: Number(row.qty) || 0, min: Number(row.min) || 0, ideal: Number(row.ideal) || 0,
-      avgCost: Number(row.avg_cost) || 0
+      avgCost: Number(row.avg_cost) || 0,
+      supplier: row.supplier || "", location: row.location || "", active: row.active !== false, notes: row.notes || ""
     };
   }
 
@@ -621,10 +636,10 @@
     }
     if (pRes.error) return false;
     state.platform = null;
-    var cRes = await supabaseClient.from("companies").select("id,name,logo_url,dashboard_token").eq("id", pRes.data.company_id).maybeSingle();
+    var cRes = await supabaseClient.from("companies").select("id,name,logo_url,dashboard_token,settings").eq("id", pRes.data.company_id).maybeSingle();
     state.currentUser = { id: session.user.id, username: pRes.data.display_name, email: session.user.email || "", role: pRes.data.role, companyId: pRes.data.company_id };
     var c = cRes && cRes.data;
-    state.company = c ? { id: c.id, name: c.name, logoUrl: c.logo_url, token: c.dashboard_token } : { id: pRes.data.company_id, name: "", logoUrl: null, token: null };
+    state.company = c ? { id: c.id, name: c.name, logoUrl: c.logo_url, token: c.dashboard_token, settings: c.settings || {} } : { id: pRes.data.company_id, name: "", logoUrl: null, token: null };
     return true;
   }
 
@@ -779,6 +794,7 @@
   }
 
   function exportExcel() {
+    if (isExtended() && typeof XLSX !== "undefined") { exportLeaf(); return; }
     if (typeof XLSX === "undefined") {
       state.importMsg = { type: "error", text: "Não foi possível carregar a biblioteca de Excel. Verifique sua conexão com a internet e tente novamente." };
       render();
@@ -826,8 +842,11 @@
     reader.onload = function (e) {
       try {
         var data = new Uint8Array(e.target.result);
-        var wb = XLSX.read(data, { type: "array" });
-        importWorkbook(wb);
+        var wb = XLSX.read(data, { type: "array", cellDates: true });
+        if (isExtended() && wb.Sheets["Cadastro de Produtos"]) {
+          if (!isAdmin()) { state.importMsg = { type: "error", text: "Só o administrador pode importar a planilha padrão." }; render(); return; }
+          leafStartImport(wb, file.name);
+        } else importWorkbook(wb);
       } catch (err) {
         state.importMsg = { type: "error", text: "Não foi possível ler o arquivo. Verifique se é uma planilha Excel válida." };
         render();
@@ -919,6 +938,210 @@
     if (stats.linhasIgnoradas) parts.push(stats.linhasIgnoradas + " linha(s) ignorada(s)");
     state.importMsg = { type: "success", text: "Importação concluída: " + parts.join(", ") + "." };
     render();
+  }
+
+  // ---------- planilha padrão (empresas com campos estendidos, ex.: Leaf) ----------
+
+  function isExtended() { return !!(state.company && state.company.settings && state.company.settings.extended); }
+  function stripItemCode(id) { return String(id || "").replace(/^[0-9a-f]{8}-/, ""); }
+  function stripMovId(id) { return String(id || "").replace(/^plan-[0-9a-f]{8}-/, ""); }
+  function isInitMovement(mv) { return mv.type === "entrada" && (/-init$/.test(mv.id) || mv.note === "Saldo inicial (planilha)" || mv.note === "Estoque inicial"); }
+
+  function normKey(s) {
+    return String(s == null ? "" : s).normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+  }
+  function cellText(v) { return v == null ? "" : String(v).trim(); }
+  function cellNum(v) {
+    if (v == null || v === "") return null;
+    if (typeof v === "number") return isFinite(v) ? v : null;
+    var s = String(v).trim().replace(/[R$\s]/g, "");
+    if (!s) return null;
+    if (s.indexOf(",") !== -1) s = s.replace(/\./g, "").replace(",", ".");
+    var n = Number(s);
+    return isFinite(n) ? n : null;
+  }
+  function pad2(n) { return (n < 10 ? "0" : "") + n; }
+  function cellDateISO(v) {
+    if (v == null || v === "") return null;
+    if (v instanceof Date && !isNaN(v)) {
+      var d = new Date(v.getTime() + 12 * 3600 * 1000);
+      return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+    }
+    if (typeof v === "number" && typeof XLSX !== "undefined" && XLSX.SSF) {
+      var p = XLSX.SSF.parse_date_code(v);
+      return p ? p.y + "-" + pad2(p.m) + "-" + pad2(p.d) : null;
+    }
+    var s = String(v).trim(), m;
+    if ((m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/))) return m[3] + "-" + pad2(+m[2]) + "-" + pad2(+m[1]);
+    if ((m = s.match(/^(\d{4})-(\d{2})-(\d{2})/))) return m[1] + "-" + m[2] + "-" + m[3];
+    return null;
+  }
+  function normRows(ws) {
+    var rows = XLSX.utils.sheet_to_json(ws, { defval: null, blankrows: true, raw: true });
+    return rows.map(function (r) { var o = {}; Object.keys(r).forEach(function (k) { o[normKey(k)] = r[k]; }); return o; });
+  }
+
+  // Lê as abas "Cadastro de Produtos" e "Movimentações" no formato padrão.
+  function leafParse(wb) {
+    var out = { produtos: [], movs: [], erros: [] };
+    var wsP = wb.Sheets["Cadastro de Produtos"], wsM = wb.Sheets["Movimentações"];
+    if (!wsP) { out.erros.push("Não encontrei a aba \"Cadastro de Produtos\"."); return out; }
+    normRows(wsP).forEach(function (r, i) {
+      var cod = cellText(r["codigo"]), nome = cellText(r["produto"]);
+      if (!cod && !nome) return;
+      var ativo = normKey(r["ativo?"] != null ? r["ativo?"] : r["ativo"]);
+      out.produtos.push({
+        linha: i + 2, codigo: cod, nome: nome, categoria: cellText(r["categoria"]), unidade: cellText(r["unidade de medida"]),
+        min: cellNum(r["estoque minimo"]), max: cellNum(r["estoque maximo"]), valor: cellNum(r["valor unitario"]),
+        fornecedor: cellText(r["fornecedor"]), localizacao: cellText(r["localizacao"]),
+        ativo: !(ativo === "nao" || ativo === "n" || ativo === "inativo" || ativo === "false"),
+        obs: cellText(r["observacoes"]), saldo_inicial: cellNum(r["saldo inicial"])
+      });
+    });
+    if (wsM) {
+      var movs = [];
+      normRows(wsM).forEach(function (r, i) {
+        var cod = cellText(r["codigo produto"]), qtd = cellNum(r["quantidade"]);
+        if (!cod && qtd == null) return;
+        var tipo = normKey(r["tipo"]);
+        var iso = cellDateISO(r["data"]);
+        movs.push({
+          linha: i + 2, _ord: i, id: cellText(r["id"]) || ("L" + (i + 2)), data: iso || "", tipo: tipo === "entrada" ? "entrada" : (tipo === "saida" ? "saida" : tipo),
+          codigo: cod, qtd: qtd, valor: cellNum(r["valor unitario"]),
+          responsavel: cellText(r["responsavel pela retirada/movimentacao"]), unidade_destino: cellText(r["unidade de destino"]),
+          setor: cellText(r["setor de destino"]), colaborador: cellText(r["colaborador"]), centro_custo: cellText(r["centro de custo"]),
+          justificativa: cellText(r["justificativa"]), documento: cellText(r["documento/referencia"]), obs: cellText(r["observacoes"])
+        });
+        if (!iso) out.erros.push("Movimentações, linha " + (i + 2) + ": data inválida ou vazia.");
+      });
+      movs.sort(function (a, b) { return a.data < b.data ? -1 : a.data > b.data ? 1 : a._ord - b._ord; });
+      out.movs = movs;
+    }
+    return out;
+  }
+
+  async function leafStartImport(wb, fileName) {
+    var parsed = leafParse(wb);
+    if (parsed.erros.length && !parsed.produtos.length) {
+      state.importMsg = { type: "error", text: parsed.erros[0] }; render(); return;
+    }
+    state.importMsg = { type: "success", text: "Conferindo a planilha…" }; render();
+    var res = await supabaseClient.rpc("importar_planilha", { p_produtos: parsed.produtos, p_movs: parsed.movs, p_confirmar: false });
+    if (res.error) { state.importMsg = { type: "error", text: "Não foi possível conferir a planilha: " + res.error.message }; render(); return; }
+    var r = res.data || {};
+    r.erros = (parsed.erros.map(function (m) { return { msg: m }; })).concat(r.erros || []);
+    r.ok = r.erros.length === 0;
+    state.importMsg = null;
+    state.leafPreview = { file: fileName, produtos: parsed.produtos, movs: parsed.movs, res: r, busy: false };
+    render();
+  }
+
+  async function leafConfirmImport() {
+    var pv = state.leafPreview;
+    if (!pv || pv.busy || !pv.res.ok) return;
+    pv.busy = true; render();
+    var res = await supabaseClient.rpc("importar_planilha", { p_produtos: pv.produtos, p_movs: pv.movs, p_confirmar: true });
+    if (res.error || !res.data || !res.data.confirmado) {
+      pv.busy = false;
+      state.importMsg = { type: "error", text: "A importação não foi feita: " + (res.error ? res.error.message : "há erros na planilha") }; render(); return;
+    }
+    var s = res.data.resumo || {};
+    state.leafPreview = null;
+    await Promise.all([loadItems(), loadMovements(), loadCategories(), loadBranches()]);
+    state.importMsg = { type: "success", text: "Planilha importada: " + s.produtos_novos + " produto(s) novo(s), " + s.produtos_atualizados + " atualizado(s), " +
+      s.entradas + " entrada(s) e " + s.saidas + " saída(s)." };
+    render();
+  }
+
+  function leafPreviewHTML() {
+    var pv = state.leafPreview;
+    if (!pv) return "";
+    var r = pv.res, s = r.resumo || {};
+    var line = function (label, n) { return n ? "<li>" + n + " " + label + "</li>" : ""; };
+    var errs = (r.erros || []).slice(0, 40).map(function (e) {
+      return "<li>" + (e.aba ? esc(e.aba) + (e.linha ? ", linha " + esc(e.linha) : "") + ": " : "") + esc(e.msg) + "</li>";
+    }).join("");
+    var more = (r.erros || []).length > 40 ? "<li>… e mais " + ((r.erros || []).length - 40) + " problema(s)</li>" : "";
+    return '<div class="est-card-box" style="margin-bottom:14px">' +
+      '<h3 style="margin:0 0 8px">Conferência da planilha ' + esc(pv.file || "") + "</h3>" +
+      "<ul style=\"margin:0 0 10px 18px\">" +
+        line("produto(s) novo(s)", s.produtos_novos) + line("produto(s) atualizado(s)", s.produtos_atualizados) +
+        line("categoria(s) nova(s)", s.categorias_novas) + line("unidade(s)/filial(is) nova(s)", s.filiais_novas) +
+        line("saldo(s) inicial(is)", s.saldos_iniciais) + line("entrada(s)", s.entradas) + line("saída(s)", s.saidas) +
+      "</ul>" +
+      ((r.avisos || []).map(function (a) { return '<div class="est-login-msg est-login-success">' + esc(a.msg) + "</div>"; }).join("")) +
+      (errs ? '<div class="est-login-msg est-login-error"><strong>Corrija estes pontos na planilha e envie de novo (nada foi gravado):</strong><ul style="margin:6px 0 0 18px">' + errs + more + "</ul></div>"
+            : '<div class="est-login-msg est-login-success">Tudo certo. Nada foi gravado ainda.</div>') +
+      '<div class="est-toolbar">' +
+        (r.ok ? '<button class="est-btn est-btn-primary" data-action="leaf-confirm"' + (pv.busy ? " disabled" : "") + ">" + ICON.check + (pv.busy ? " Importando…" : " Confirmar importação") + "</button>" : "") +
+        '<button class="est-btn" data-action="leaf-cancel">' + ICON.x + " Cancelar</button>" +
+      "</div></div>";
+  }
+
+  function exportLeaf() {
+    var wb = XLSX.utils.book_new();
+    var cfg = (state.company && state.company.settings) || {};
+    var menu = [["CONTROLE DE ESTOQUE – " + (state.company.name || "").toUpperCase()], [], ["Como usar"],
+      ["1. Cadastre ou ajuste os produtos na aba 'Cadastro de Produtos' (a coluna 'Saldo Inicial' é o saldo antes das movimentações)."],
+      ["2. Registre toda entrada e saída na aba 'Movimentações'."],
+      ["3. Para cada saída, informe responsável, unidade, setor, colaborador e justificativa."],
+      ["4. Consulte a aba 'Estoque Atual' para acompanhar saldo, mínimo/máximo e necessidade de reposição."],
+      ["5. Envie esta mesma planilha de volta no app (Importar Excel) para atualizar o sistema."]];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(menu), "Menu Principal");
+
+    var initQty = {};
+    state.movements.forEach(function (mv) { if (isInitMovement(mv)) initQty[mv.itemId] = (initQty[mv.itemId] || 0) + mv.qty; });
+    var catLabel = function (k) { for (var ci = 0; ci < state.categories.length; ci++) if (state.categories[ci].key === k) return state.categories[ci].label; return k; };
+    var items = state.items.slice().sort(function (a, b) { return stripItemCode(a.id) < stripItemCode(b.id) ? -1 : 1; });
+    var prod = [["Código", "Produto", "Categoria", "Unidade de Medida", "Estoque Mínimo", "Estoque Máximo", "Valor Unitário", "Fornecedor", "Localização", "Ativo?", "Observações", "Saldo Inicial"]];
+    items.forEach(function (it) {
+      prod.push([stripItemCode(it.id), it.name, catLabel(it.category), it.unit, it.min, it.ideal, it.avgCost, it.supplier || "", it.location || "",
+        it.active === false ? "Não" : "Sim", it.notes || "", initQty[it.id] != null ? initQty[it.id] : ""]);
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(prod), "Cadastro de Produtos");
+
+    var codeOf = {}, nameOf = {};
+    items.forEach(function (it) { codeOf[it.id] = stripItemCode(it.id); nameOf[it.id] = it.name; });
+    var movs = state.movements.filter(function (mv) { return !isInitMovement(mv); }).slice().sort(function (a, b) { return new Date(a.occurredAt) - new Date(b.occurredAt); });
+    var branchLabel = function (k) { var b = findBranchByKey(k); return b ? b.label : (k || ""); };
+    var mrows = [["ID", "Data", "Tipo", "Código Produto", "Produto", "Quantidade", "Valor Unitário", "Valor Total", "Responsável pela Retirada/Movimentação", "Unidade de Destino", "Setor de Destino", "Colaborador", "Centro de Custo", "Justificativa", "Documento/Referência", "Observações"]];
+    movs.forEach(function (mv, i) {
+      var d = new Date(mv.occurredAt);
+      mrows.push([stripMovId(mv.id), new Date(d.getFullYear(), d.getMonth(), d.getDate()), mv.type === "entrada" ? "Entrada" : "Saída", codeOf[mv.itemId] || stripItemCode(mv.itemId),
+        nameOf[mv.itemId] || mv.itemName || "", mv.qty, mv.unitValue, mv.totalValue, mv.withdrawalName || mv.registeredBy || "",
+        mv.type === "saida" ? branchLabel(mv.branch) : "", mv.sector || "", mv.collaborator || "", mv.costCenter || "", mv.reason || "", mv.document || "", mv.note || ""]);
+    });
+    var wsM = XLSX.utils.aoa_to_sheet(mrows, { cellDates: true });
+    for (var r = 1; r < mrows.length; r++) { var cell = wsM["B" + (r + 1)]; if (cell) cell.z = "dd/mm/yyyy"; }
+    XLSX.utils.book_append_sheet(wb, wsM, "Movimentações");
+
+    var ent = {}, sai = {};
+    movs.forEach(function (mv) { if (mv.type === "entrada") ent[mv.itemId] = (ent[mv.itemId] || 0) + mv.qty; else sai[mv.itemId] = (sai[mv.itemId] || 0) + mv.qty; });
+    var est = [["Código", "Produto", "Categoria", "Unidade", "Mínimo", "Máximo", "Entradas", "Saídas", "Saldo Atual", "Status", "Valor Unitário", "Valor em Estoque"]];
+    items.forEach(function (it) {
+      var status = it.qty < it.min ? "REPOR ESTOQUE" : (it.ideal && it.qty > it.ideal ? "ACIMA DO MÁXIMO" : "OK");
+      est.push([stripItemCode(it.id), it.name, catLabel(it.category), it.unit, it.min, it.ideal, ent[it.id] || 0, sai[it.id] || 0, it.qty, status, it.avgCost, it.qty * it.avgCost]);
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(est), "Estoque Atual");
+
+    var uniq = function (arr) { var seen = {}, o = []; arr.forEach(function (v) { v = cellText(v); if (v && !seen[v]) { seen[v] = 1; o.push(v); } }); return o; };
+    var cols = [["Tipos_Movimentacao", ["Entrada", "Saída"]], ["Unidades", state.branches.map(function (b) { return b.label; })],
+      ["Setores", cfg.setores || []], ["Categorias", state.categories.map(function (c) { return c.label; })],
+      ["Unidades_Medida", uniq(state.items.map(function (i) { return i.unit; }))], ["Responsaveis", cfg.responsaveis || []],
+      ["Colaboradores", uniq(state.movements.map(function (m) { return m.collaborator; }))]];
+    var max = 0; cols.forEach(function (c) { max = Math.max(max, c[1].length); });
+    var lists = [cols.map(function (c) { return c[0]; })];
+    for (var i = 0; i < max; i++) lists.push(cols.map(function (c) { return c[1][i] != null ? c[1][i] : ""; }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(lists), "Listas");
+
+    var totalVal = 0, repor = 0, acima = 0, totalQty = 0;
+    items.forEach(function (it) { totalVal += it.qty * it.avgCost; totalQty += it.qty; if (it.qty < it.min) repor++; else if (it.ideal && it.qty > it.ideal) acima++; });
+    var dash = [["DASHBOARD – CONTROLE DE ESTOQUE"], [], ["Total de produtos cadastrados", items.length], ["Itens em estoque", totalQty],
+      ["Valor total em estoque", totalVal], ["Produtos para reposição", repor], ["Produtos acima do máximo", acima]];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dash), "Dashboard");
+
+    try { XLSX.writeFile(wb, "controle-de-estoque-" + slugify(state.company.name || "empresa") + ".xlsx", { cellDates: true }); }
+    catch (e) { state.importMsg = { type: "error", text: "Não foi possível gerar o arquivo Excel." }; render(); }
   }
 
   function timeStr(d) {
@@ -1208,8 +1431,9 @@
           "</div></div>";
       }).join("") + "</div>";
 
-    var importBanner = (navigable && state.importMsg) ?
-      ('<div class="est-login-msg ' + (state.importMsg.type === "error" ? "est-login-error" : "est-login-success") + '" style="margin-bottom:14px">' + esc(state.importMsg.text) + "</div>") : "";
+    var leafBlock = (navigable && state.leafPreview) ? leafPreviewHTML() : "";
+    var importBanner = leafBlock + ((navigable && state.importMsg) ?
+      ('<div class="est-login-msg ' + (state.importMsg.type === "error" ? "est-login-error" : "est-login-success") + '" style="margin-bottom:14px">' + esc(state.importMsg.text) + "</div>") : "");
 
     var excelBar = navigable ?
       ('<div class="est-toolbar">' +
@@ -1258,6 +1482,20 @@
     }).join("");
   }
 
+  function extItemFields(initial) {
+    if (!isExtended()) return "";
+    var v = initial || {};
+    return (initial ? "" : '<div class="est-field"><label class="est-label">Código</label><input class="est-input" id="if-code" maxlength="30" placeholder="Ex.: P050"/></div>') +
+      '<div class="est-field"><label class="est-label">Fornecedor</label><input class="est-input" id="if-supplier" maxlength="120" value="' + esc(v.supplier || "") + '"/></div>' +
+      '<div class="est-field"><label class="est-label">Localização</label><input class="est-input" id="if-location" maxlength="120" value="' + esc(v.location || "") + '"/></div>' +
+      '<div class="est-field"><label class="est-label">Ativo?</label><select class="est-select" id="if-active" style="width:100%"><option value="1"' + (v.active === false ? "" : " selected") + '>Sim</option><option value="0"' + (v.active === false ? " selected" : "") + '>Não</option></select></div>' +
+      '<div class="est-field" style="flex-basis:100%"><label class="est-label">Observações</label><input class="est-input" id="if-notes" maxlength="500" value="' + esc(v.notes || "") + '"/></div>';
+  }
+  function readExtItem() {
+    var g = function (i) { return ((document.getElementById(i) || {}).value || "").trim(); };
+    return { supplier: g("if-supplier") || null, location: g("if-location") || null, active: g("if-active") !== "0", notes: g("if-notes") || null };
+  }
+
   function itemFormHTML(categoryKey, initial) {
     var v = initial || { name: "", unit: "un", qty: 0, min: 0, ideal: 0 };
     var qtyBlock = initial ?
@@ -1274,11 +1512,30 @@
       qtyBlock +
       '<div class="est-field"><label class="est-label">Nível baixo até</label><input class="est-input" type="number" id="if-min" value="' + esc(v.min) + '"/></div>' +
       '<div class="est-field"><label class="est-label">Nível OK a partir de</label><input class="est-input" type="number" id="if-ideal" value="' + esc(v.ideal) + '"/></div>' +
+      extItemFields(initial) +
       "</div>" + hint +
       '<div style="display:flex;gap:8px">' +
       '<button class="est-btn est-btn-primary" data-action="save-item" data-cat="' + categoryKey + '" data-id="' + (initial ? initial.id : "") + '">' + ICON.check + " Salvar</button>" +
       '<button class="est-btn" data-action="cancel-form">' + ICON.x + " Cancelar</button>" +
       "</div></div>";
+  }
+
+  function extMovFields(type) {
+    var cfg = (state.company && state.company.settings) || {};
+    var opts = function (arr) { return (arr || []).map(function (s) { return '<option value="' + esc(s) + '">'; }).join(""); };
+    return '<datalist id="dl-resp">' + opts(cfg.responsaveis) + "</datalist>" +
+      '<div class="est-field"><label class="est-label">Responsável pela movimentação</label><input class="est-input" id="mv-resp" list="dl-resp" maxlength="120" value="' + esc(state.currentUser ? state.currentUser.username : "") + '"/></div>' +
+      (type === "saida" ?
+        '<div class="est-field"><label class="est-label">Setor de destino</label><select class="est-select" id="mv-sector" style="width:100%"><option value="">—</option>' +
+          (cfg.setores || []).map(function (s) { return '<option value="' + esc(s) + '">' + esc(s) + "</option>"; }).join("") + "</select></div>" +
+        '<div class="est-field"><label class="est-label">Colaborador</label><input class="est-input" id="mv-collab" maxlength="120"/></div>' +
+        '<div class="est-field"><label class="est-label">Centro de custo</label><input class="est-input" id="mv-cc" maxlength="80"/></div>' : "") +
+      '<div class="est-field"><label class="est-label">Documento/Referência</label><input class="est-input" id="mv-doc" maxlength="120"/></div>' +
+      '<div class="est-field" style="flex-basis:100%"><label class="est-label">Observações</label><input class="est-input" id="mv-note" maxlength="500"/></div>';
+  }
+  function readExtMov() {
+    var g = function (i) { return ((document.getElementById(i) || {}).value || "").trim(); };
+    return { withdrawal_name: g("mv-resp"), sector: g("mv-sector"), collaborator: g("mv-collab"), cost_center: g("mv-cc"), document: g("mv-doc"), note: g("mv-note") };
   }
 
   function movementFormHTML(item, type) {
@@ -1295,12 +1552,13 @@
         '<div class="est-field"><label class="est-label">Quantidade</label><input class="est-input" type="number" min="0.01" step="0.01" id="mv-qty" placeholder="0"/></div>' +
         '<div class="est-field"><label class="est-label">Motivo da saída</label><select class="est-select" id="mv-reason" style="width:100%">' +
         MOTIVOS_SAIDA.map(function (m) { return '<option value="' + esc(m) + '">' + esc(m) + "</option>"; }).join("") + "</select></div>" +
-        '<div class="est-field"><label class="est-label">Nomeação da retirada</label><input class="est-input" id="mv-name" placeholder="Ex.: Manutenção, nome de quem retirou…"/></div>' +
+        (isExtended() ? "" : '<div class="est-field"><label class="est-label">Nomeação da retirada</label><input class="est-input" id="mv-name" placeholder="Ex.: Manutenção, nome de quem retirou…"/></div>') +
         '<div class="est-field"><label class="est-label">Filial</label><select class="est-select" id="mv-branch" style="width:100%">' +
         state.branches.map(function (b) { return '<option value="' + b.key + '">' + esc(b.label) + "</option>"; }).join("") +
         "</select></div>" +
         '<div class="est-field"><label class="est-label">Data e hora</label><input class="est-input" type="datetime-local" id="mv-datetime" value="' + nowVal + '"/></div>';
     }
+    if (isExtended()) fields += extMovFields(type);
     return '<div class="est-form">' + errorBlock +
       '<div class="est-form-grid">' + fields + "</div>" +
       '<div class="est-row-meta" style="margin-bottom:10px">Estoque atual: ' + (Number(item.qty) || 0) + " " + esc(item.unit) +
@@ -1784,6 +2042,19 @@
       '</div></div></div>';
   }
 
+  function extConfigHTML() {
+    if (!isExtended()) return "";
+    var cfg = state.company.settings || {};
+    var msg = state.cfgMsg ? '<div class="est-login-msg ' + (state.cfgMsg.type === "error" ? "est-login-error" : "est-login-success") + '">' + esc(state.cfgMsg.text) + "</div>" : "";
+    return '<div style="border-top:1px solid #E5E7EB;padding-top:22px;margin-bottom:30px">' +
+      '<h2 class="est-h2" style="margin:0 0 4px">Listas da empresa</h2>' +
+      '<div class="est-row-meta" style="margin-bottom:12px">Setores e responsáveis oferecidos nos formulários. Um por linha.</div>' +
+      '<div class="est-form">' + msg + '<div class="est-form-grid">' +
+      '<div class="est-field"><label class="est-label">Setores</label><textarea class="est-input" id="cfg-setores" rows="6">' + esc((cfg.setores || []).join("\n")) + "</textarea></div>" +
+      '<div class="est-field"><label class="est-label">Responsáveis</label><textarea class="est-input" id="cfg-resp" rows="6">' + esc((cfg.responsaveis || []).join("\n")) + "</textarea></div>" +
+      '</div><button class="est-btn est-btn-primary" data-action="save-cfg"' + (state.saving ? " disabled" : "") + ">" + ICON.check + " Salvar listas</button></div></div>";
+  }
+
   function renderAdminPage() {
     var pwdSection = '<div style="margin-bottom:30px">' +
       '<h2 class="est-h2" style="margin:0 0 4px">Minha conta</h2>' +
@@ -1793,7 +2064,7 @@
 
     if (!isAdmin()) return pwdSection;
 
-    return pwdSection + brandSectionHTML() + '<div style="border-top:1px solid #E5E7EB;padding-top:22px">' + renderUsersPage() + "</div>";
+    return pwdSection + brandSectionHTML() + extConfigHTML() + '<div style="border-top:1px solid #E5E7EB;padding-top:22px">' + renderUsersPage() + "</div>";
   }
 
   // ---------- relatórios ----------
@@ -1839,7 +2110,8 @@
     var isEntrada = mv.type === "entrada";
     var detail = isEntrada ?
       ("Valor unit. " + brl(mv.unitValue)) :
-      (esc((findBranchByKey(mv.branch) || {}).label || mv.branch) + " · " + esc(mv.withdrawalName || "") + (mv.reason ? " · motivo: " + esc(mv.reason) : ""));
+      (esc((findBranchByKey(mv.branch) || {}).label || mv.branch) + " · " + esc(mv.withdrawalName || "") + (mv.reason ? " · motivo: " + esc(mv.reason) : "")) +
+      (mv.sector ? " · setor: " + esc(mv.sector) : "") + (mv.collaborator ? " · colab.: " + esc(mv.collaborator) : "") + (mv.costCenter ? " · CC: " + esc(mv.costCenter) : "") + (mv.document ? " · doc: " + esc(mv.document) : "");
     return '<div class="est-row">' +
       (isEntrada ? ICON.arrowIn : ICON.arrowOut) +
       '<div style="flex:1"><div class="est-row-name">' + esc(mv.itemName) + " <span style=\"font-weight:400;color:#8A8F98\">· " + esc(cat.label) + "</span></div>" +
@@ -2071,6 +2343,7 @@
         "Valor unitário (R$)": Number(row.unit_value) || 0,
         "Valor total (R$)": Number(row.total_value) || 0,
         "Filial": row.branch || "", "Retirada": row.withdrawal_name || "", "Motivo": row.reason || "",
+        "Setor": row.sector || "", "Colaborador": row.collaborator || "", "Centro de custo": row.cost_center || "", "Documento": row.document || "",
         "Registrado por": row.registered_by || ""
       };
     });
@@ -2573,6 +2846,17 @@
       state.categories = state.categories.filter(function (c) { return c.key !== id; });
       if (state.activeTab === id) state.activeTab = "dashboard";
       render();
+    } else if (action === "save-cfg") {
+      if (!isAdmin() || !isExtended()) return;
+      var lines = function (id) { var seen = {}; return ((document.getElementById(id) || {}).value || "").split("\n").map(function (s) { return s.trim(); }).filter(function (s) { if (!s || seen[s.toLowerCase()]) return false; seen[s.toLowerCase()] = 1; return true; }); };
+      var setores = lines("cfg-setores"), resps = lines("cfg-resp");
+      state.saving = true; render();
+      var cfgRes = await supabaseClient.rpc("salvar_configuracao_empresa", { p_setores: setores, p_responsaveis: resps });
+      state.saving = false;
+      if (cfgRes.error) { state.cfgMsg = { type: "error", text: "Não foi possível salvar: " + cfgRes.error.message }; render(); return; }
+      state.company.settings = Object.assign({}, state.company.settings, { setores: setores, responsaveis: resps });
+      state.cfgMsg = { type: "success", text: "Listas salvas." };
+      render();
     } else if (action === "save-brand") {
       if (!isAdmin() || !state.company) return;
       var bName = ((document.getElementById("brand-name") || {}).value || "").trim();
@@ -2636,6 +2920,10 @@
       state.addingBranch = false;
       state.branchFormError = "";
       render();
+    } else if (action === "leaf-confirm") {
+      leafConfirmImport();
+    } else if (action === "leaf-cancel") {
+      state.leafPreview = null; render();
     } else if (action === "export-excel") {
       exportExcel();
     } else if (action === "trigger-import") {
@@ -2758,8 +3046,10 @@
       var idealVal = Number((document.getElementById("if-ideal") || {}).value) || 0;
       state.itemFormError = "";
       if (id) {
+        var updFields = { name: name.trim(), unit: unitVal, min: minVal, ideal: idealVal };
+        if (isExtended()) { var ex0 = readExtItem(); updFields.supplier = ex0.supplier; updFields.location = ex0.location; updFields.active = ex0.active; updFields.notes = ex0.notes; }
         state.saving = true; render();
-        var updRes = await supabaseClient.from("items").update({ name: name.trim(), unit: unitVal, min: minVal, ideal: idealVal }).eq("id", id);
+        var updRes = await supabaseClient.from("items").update(updFields).eq("id", id);
         state.saving = false;
         if (updRes.error) { state.itemFormError = "Não foi possível salvar: " + updRes.error.message; render(); return; }
         var existingItem = findItemById(id);
@@ -2768,6 +3058,16 @@
         var initQty = Math.max(0, Number((document.getElementById("if-qty") || {}).value) || 0);
         var initValue = Math.max(0, Number((document.getElementById("if-value") || {}).value) || 0);
         var newItemId = uid();
+        var extNew = null;
+        if (isExtended()) {
+          extNew = readExtItem();
+          var codeIn = ((document.getElementById("if-code") || {}).value || "").trim();
+          if (codeIn) {
+            if (!/^[A-Za-z0-9._-]{1,30}$/.test(codeIn)) { state.itemFormError = "Código: use só letras, números, ponto, hífen ou sublinhado."; render(); return; }
+            newItemId = state.company.id.slice(0, 8) + "-" + codeIn;
+            if (findItemById(newItemId)) { state.itemFormError = "Já existe um produto com esse código."; render(); return; }
+          }
+        }
         state.saving = true; render();
         var createRes = await supabaseClient.rpc("criar_item_inicial", {
           p_id: newItemId, p_category: cat, p_name: name.trim(), p_unit: unitVal, p_qty: initQty,
@@ -2775,6 +3075,10 @@
         });
         state.saving = false;
         if (createRes.error) { state.itemFormError = "Não foi possível criar o item: " + createRes.error.message; render(); return; }
+        if (extNew) {
+          var exRes = await supabaseClient.from("items").update(extNew).eq("id", newItemId);
+          if (exRes.error) state.globalError = "Item criado, mas não foi possível salvar os campos extras: " + exRes.error.message;
+        }
         await refetchItem(newItemId);
         if (initQty > 0) await refetchMovement(newItemId + "-init");
       }
@@ -2817,25 +3121,31 @@
       if (state.movementType === "entrada") {
         var unitValue = Number((document.getElementById("mv-value") || {}).value);
         if (unitValue == null || isNaN(unitValue) || unitValue < 0) unitValue = 0;
+        var extIn = isExtended() ? readExtMov() : null;
         state.saving = true; render();
-        var entradaRes = await supabaseClient.rpc("registrar_entrada", {
+        var entradaArgs = {
           p_id: newMovementId, p_item_id: mvItem.id, p_qtd: qtyVal, p_valor_unit: unitValue,
           p_ocorrido_em: occurredAt.toISOString(), p_registrado_por: state.currentUser.username
-        });
+        };
+        if (extIn) entradaArgs.p_extra = extIn;
+        var entradaRes = await supabaseClient.rpc(isExtended() ? "registrar_entrada_v2" : "registrar_entrada", entradaArgs);
         state.saving = false;
         if (entradaRes.error) { state.movementError = entradaRes.error.message || "Não foi possível registrar a entrada."; render(); return; }
       } else {
-        var withdrawalName = ((document.getElementById("mv-name") || {}).value || "").trim();
+        var extMv = isExtended() ? readExtMov() : null;
+        var withdrawalName = extMv ? extMv.withdrawal_name : ((document.getElementById("mv-name") || {}).value || "").trim();
         var branchKey = (document.getElementById("mv-branch") || {}).value || "";
         var reasonVal = (document.getElementById("mv-reason") || {}).value || "";
         if (MOTIVOS_SAIDA.indexOf(reasonVal) < 0) { state.movementError = "Selecione o motivo da saída."; render(); return; }
         if (!withdrawalName) { state.movementError = "Informe o nome de quem retirou ou o destino."; render(); return; }
         if (!findBranchByKey(branchKey)) { state.movementError = "Selecione a filial."; render(); return; }
         state.saving = true; render();
-        var saidaRes = await supabaseClient.rpc("registrar_saida_v2", {
+        var saidaArgs = {
           p_id: newMovementId, p_item_id: mvItem.id, p_qtd: qtyVal, p_nome_retirada: withdrawalName, p_filial: branchKey,
           p_ocorrido_em: occurredAt.toISOString(), p_registrado_por: state.currentUser.username, p_motivo: reasonVal
-        });
+        };
+        if (extMv) saidaArgs.p_extra = extMv;
+        var saidaRes = await supabaseClient.rpc(extMv ? "registrar_saida_v3" : "registrar_saida_v2", saidaArgs);
         state.saving = false;
         if (saidaRes.error) { state.movementError = saidaRes.error.message || "Não foi possível registrar a saída."; render(); return; }
       }

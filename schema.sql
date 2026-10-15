@@ -48,3 +48,20 @@
 -- app_private.teste_plataforma(): prova de isolamento da plataforma (desfaz tudo ao final).
 -- v1.7+: signup_requests.notified_at; Edge Function notificar-solicitacoes (pública, sem entrada do chamador):
 --   envia e-mail ao dono (Resend; segredos RESEND_API_KEY, opcionais NOTIFY_EMAIL e NOTIFY_FROM) e marca como avisadas.
+
+-- =====================================================================
+-- v1.8 — Planilha padrão da Leaf (campos estendidos)
+-- =====================================================================
+-- items: + supplier, location, active (default true), notes
+-- movements: + sector, collaborator, cost_center, document
+-- companies: + settings jsonb  ({extended:true, setores:[...], responsaveis:[...]}); só a plataforma altera "extended"
+-- app_private.slug(text), app_private.to_num(text): ajudantes de texto/número
+-- public.salvar_configuracao_empresa(p_setores jsonb, p_responsaveis jsonb)  -- admin da empresa
+-- public.registrar_entrada_v2(..., p_extra jsonb) / registrar_saida_v3(..., p_extra jsonb)  -- gravam setor/colaborador/centro de custo/documento
+-- public.importar_planilha(p_produtos jsonb, p_movs jsonb, p_confirmar boolean)
+--   * só administrador da empresa; security definer; tudo numa transação
+--   * p_confirmar=false simula e desfaz (devolve resumo/erros/avisos); true só grava se não houver erro
+--   * produtos por código (id = 8 primeiros dígitos da empresa + '-' + código), categorias/filiais criadas se faltarem
+--   * "Saldo Inicial" vira entrada datada 1 dia antes da primeira movimentação do produto
+--   * movimentações em ordem; saída sem saldo = erro; reimportar a mesma planilha não duplica (ids 'plan-<emp>-<ID>')
+--   * custo médio ponderado nas entradas; saídas usam o custo médio
